@@ -10,6 +10,7 @@ import { listRoutes, routeTask } from "./router";
 import {
   assertBrowserAllowed,
   assertPacketAllowed,
+  CONNECTED_LEGEND,
   connectModel,
   disconnectModel,
   isModelConnected,
@@ -54,9 +55,11 @@ import {
 } from "./tenants/tenants";
 import { createTenantContext, tenantCapUsd, TenantContext } from "./tenants/context";
 
-// TrustyMUSE Harness V1.6 CLI. Local only, multi-tenant.
-// V1.6 adds browser Connect and Disconnect per account (see
-// docs/V1-6-BROWSER-CONNECT.md). Every major chat AI has a subscription
+// TrustyMUSE Harness V1.7 CLI. Local only, multi-tenant.
+// V1.7 removes the auto-seed: a fresh tenant starts with zero connected
+// models, and a model connects only through an explicit model-connect
+// (see docs/V1-7-CONNECTED-MEANS.md). V1.6 adds browser Connect and
+// Disconnect per account (see docs/V1-6-BROWSER-CONNECT.md). Every major chat AI has a subscription
 // Connect button in V1.5: chatgpt,
 // claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral.
 // Packet mode works for every connected subscription model at once. The
@@ -107,7 +110,7 @@ function getArg(args: string[], name: string, fallback: string): string {
 }
 
 function printHelp(): void {
-  console.log("TrustyMUSE Harness V1.6");
+  console.log("TrustyMUSE Harness V1.7");
   console.log("Usage:");
   console.log("  node dist/index.js status [--tenant <id>]");
   console.log("  node dist/index.js packet --model chatgpt --type seo --title \"Title\" --task \"Task text\" [--project my-project] [--tenant <id>]");
@@ -388,7 +391,7 @@ async function main(): Promise<void> {
 
   if (command === "status") {
     const status = budget.getStatus();
-    console.log("TrustyMUSE Harness V1.6 status");
+    console.log("TrustyMUSE Harness V1.7 status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${ctx.tenant.id}), ${tenantCount} tenant(s) on this install`);
     console.log(`Mode: ${config.subscriptionEnabled ? "subscription" : "none"}${config.apiEnabled ? " + api" : ""}${config.browser.enabled ? " + browser" : ""}`);
     console.log(`Browser: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}, headless ${config.browser.headless}, pacing ${config.browser.pacingMs} ms, daily limit ${config.browser.dailyLimitPerAccount} per account, max accounts ${config.browser.maxAccounts}`);
@@ -416,6 +419,7 @@ async function main(): Promise<void> {
     console.log(
       `Connected subscription models for tenant ${tenantId}: ${connectedModels.map((m) => m.id).join(", ") || "none"}. Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude.`,
     );
+    console.log(CONNECTED_LEGEND);
     console.log("Routes:");
     for (const route of listRoutes()) {
       console.log(`  ${route.taskType} -> ${route.slot}, primary ${route.primaryModel}, fallback ${route.fallbackModel}, tier ${route.tier}`);
@@ -590,7 +594,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "session-status") {
-    console.log("TrustyMUSE Harness V1.6 browser session status");
+    console.log("TrustyMUSE Harness V1.7 browser session status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Browser mode: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}`);
     console.log(`Headless: ${config.browser.headless}, profile root: ${ctx.profileRoot}`);
@@ -979,7 +983,7 @@ async function main(): Promise<void> {
     for (const project of projects) {
       byStatus[project.status] += 1;
     }
-    console.log("TrustyMUSE Harness V1.6 project status");
+    console.log("TrustyMUSE Harness V1.7 project status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Connected: ${projects.length} of max ${config.projects.maxProjects}. Active ${byStatus.active}, paused ${byStatus.paused}, archived ${byStatus.archived}.`);
     console.log(`Policy HOLD: ${config.hold ? "ON, project writes are blocked" : "OFF"}`);
@@ -1002,6 +1006,7 @@ async function main(): Promise<void> {
       console.log(`  ${model.id} (${model.provider}, ${model.connection}, ${model.costMode}, ${model.status}, browser ${model.browserSupport}, ${state}${model.chatUrl ? `, ${model.chatUrl}` : ""})`);
     }
     console.log("Connect a subscription model with model-connect. Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude.");
+    console.log(CONNECTED_LEGEND);
     return;
   }
 

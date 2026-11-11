@@ -265,7 +265,7 @@ export function removeTenant(id: string, rootDir?: string): TenantEntry {
 }
 
 // First-run setup for a new Muse account. Interactive-free: creates the
-// tenant, never asks for a password or a key, and returns the five next
+// tenant, never asks for a password or a key, and returns the six next
 // steps the user follows by hand. The caller writes config.yaml.
 export function setupTenant(
   input: TenantInput,
@@ -277,6 +277,7 @@ export function setupTenant(
     "Connect your own ChatGPT or Claude account with: node dist/index.js account-add --provider chatgpt --id main --label \"Main ChatGPT\" --tenant " + tenant.id,
     "Log in once by hand in that profile, in your own browser. The harness never asks for your password.",
     "Connect your own project with: node dist/index.js project-add --id my-project --name \"My Project\" --kind web-app --path ~/workspace/my-project --tenant " + tenant.id,
+    "Connect the model first, no model starts connected: node dist/index.js model-connect --model chatgpt --tenant " + tenant.id,
     "Run your first job with: node dist/index.js packet --model chatgpt --type seo --title \"First task\" --task \"Write a draft.\" --project my-project --tenant " + tenant.id,
   ];
   return { tenant, steps };

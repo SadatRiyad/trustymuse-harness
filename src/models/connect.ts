@@ -9,19 +9,25 @@ import {
   listConnectedModels as listConnectedRegistryModels,
 } from "../registry";
 
-// Per-tenant connected subscription models, V1.5.
+// Per-tenant connected subscription models, V1.5, fixed in V1.7.
 // A "Connect" is a local record only: the tenant's models.json holds the
 // ids of the subscription models that tenant has connected. Connecting
 // never logs in, never stores a password or a token, never places a call,
 // and never touches another tenant: the file lives under
 // state/tenants/<tenantId>/models.json, and every function here takes the
 // tenant's own TenantContext.
-// ChatGPT and Claude start connected for every tenant. Every other
-// subscription model starts disconnected for every tenant and is connected
-// with model-connect. API models can never be connected here: an API needs
-// a key and a budget cap above 0, which is a separate flow.
+// Since V1.7 every tenant starts with ZERO connected models. A model
+// becomes connected only through an explicit model-connect command by the
+// user. Before V1.7 a fresh tenant was seeded with chatgpt and claude on
+// first read, which made them look connected without anyone connecting
+// them; that seeding is removed. Tenants whose models.json already exists
+// keep exactly what they have. API models can never be connected here: an
+// API needs a key and a budget cap above 0, which is a separate flow.
 
-export const DEFAULT_CONNECTED_MODELS: string[] = ["chatgpt", "claude"];
+// One-line legend printed by model-list and status, so "connected" is
+// never mistaken for a live login. Keep it short and plain.
+export const CONNECTED_LEGEND =
+  "Connected means enabled for packet mode only. It is not a live login, not a stored token, and not a live call. For chatgpt and claude, run browser-status to check the live browser verification.";
 
 export function modelsFilePath(ctx: TenantContext): string {
   return path.join(ctx.stateDir, "models.json");
@@ -56,14 +62,17 @@ function saveConnectedIds(ctx: TenantContext, ids: string[]): void {
   fs.writeFileSync(modelsFilePath(ctx), JSON.stringify(ids, null, 2) + "\n", "utf-8");
 }
 
-// Load the tenant's connected ids. A missing file is seeded with the
-// defaults (chatgpt and claude connected) and the seed is written to disk,
-// so the file always exists after the first read.
+// Load the tenant's connected ids. A missing file means a fresh tenant,
+// which starts with zero connected models: an empty list is written to
+// disk, so the file always exists after the first read, and nothing is
+// connected until the user runs model-connect for it. A file that already
+// exists is loaded exactly as it is, so explicit connections are never
+// removed on load.
 export function loadConnectedIds(ctx: TenantContext): string[] {
   const file = modelsFilePath(ctx);
   if (!fs.existsSync(file)) {
-    saveConnectedIds(ctx, [...DEFAULT_CONNECTED_MODELS]);
-    return [...DEFAULT_CONNECTED_MODELS];
+    saveConnectedIds(ctx, []);
+    return [];
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;

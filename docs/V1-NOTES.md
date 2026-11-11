@@ -1,6 +1,12 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-11. Status: V1.6 local only, multi-tenant. Version 1.6.0. No GitHub push, no deploy, no live paid API, no credential stored, no live prompt sent yet.
+Date: 2026-11-11. Status: V1.7 local only, multi-tenant, public repo. Version 1.7.0. No deploy, no live paid API, no credential stored, no live prompt sent yet.
+
+## What V1.7 adds: Connected Means Packet Only
+
+- Removed the auto-seed in `src/models/connect.ts`: a fresh tenant starts with zero connected models, and a model connects only through an explicit `model-connect` command. Before V1.7 a fresh tenant was seeded with chatgpt and claude on first read, which made them look connected without anyone connecting them. Tenants whose `models.json` already exists keep exactly what they have. See `docs/V1-7-CONNECTED-MEANS.md`.
+- `status` and `model-list` print a one-line legend: connected means enabled for packet mode only, it is not a live login, not a stored token, and not a live call. For chatgpt and claude it points at `browser-status` for the live browser verification.
+- New tests in `tests/run-model-connect-tests.mjs`, 9 groups, temp dirs only, including a real CLI scratch-copy test for the legend line. `npm test` now runs 91 groups.
 
 ## What V1.6 adds: Browser Connect and Disconnect
 
@@ -13,10 +19,10 @@ Date: 2026-11-11. Status: V1.6 local only, multi-tenant. Version 1.6.0. No GitHu
 ## What V1.5 adds: Subscription Models
 
 - 9 subscription models in the registry, each with a chat URL and a browser support flag: chatgpt and claude `wired`, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral `packet-only`. API entries unchanged, gemini-api separate from the gemini subscription entry. See `docs/V1-5-MODELS.md`.
-- Per-tenant connect state in `src/models/connect.ts`, stored in `state/tenants/<tenantId>/models.json`. ChatGPT and Claude start connected for every tenant; the 7 new models start disconnected. Connecting is a local record plus an audit event, never a login, never a password or token, never a call. API models are refused by model-connect. Disconnecting chatgpt or claude is refused while the tenant has an active browser account for it.
+- Per-tenant connect state in `src/models/connect.ts`, stored in `state/tenants/<tenantId>/models.json`. ChatGPT and Claude start connected for every tenant; the 7 new models start disconnected. (Changed in V1.7: no model starts connected; a model connects only through an explicit model-connect. See `docs/V1-7-CONNECTED-MEANS.md`.) Connecting is a local record plus an audit event, never a login, never a password or token, never a call. API models are refused by model-connect. Disconnecting chatgpt or claude is refused while the tenant has an active browser account for it.
 - CLI: `model-list`, `model-connect` (alias `connect`), `model-disconnect`. `packet --model` accepts any connected subscription model and refuses unconnected and API models. `run-browser` refuses every packet-only model. `status` shows connected models for the active tenant. Packets name the model and its chat URL. Slot suggestions in `modelsForSlot` are suggestions only.
 - Honest split: packet mode works for all 9 models at once. Browser mode is wired only for chatgpt and claude. No login, selector, or live test exists for any new model, and none is claimed. Wiring a new driver needs the V1.2 path: live login check, live selector verification, first live test.
-- Seeded: sadat-riyad tenant has chatgpt and claude connected and the 7 new models disconnected, in `state/tenants/sadat-riyad/models.json`.
+- Seeded: sadat-riyad tenant has chatgpt and claude connected and the 7 new models disconnected, in `state/tenants/sadat-riyad/models.json`. (Changed in V1.7: sadat-riyad now has all 9 connected by explicit activation; fresh tenants start with zero. See `docs/V1-7-CONNECTED-MEANS.md`.)
 - New tests in `tests/run-model-tests.mjs`, 15 groups, temp dirs only. `npm test` now runs 67 groups: V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15.
 
 ## What V1.4 adds: Multi-tenant support

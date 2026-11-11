@@ -172,16 +172,17 @@ addTenant({ id: "tenant-two", displayName: "Two" }, { rootDir: maxRoot, maxTenan
 assert.throws(() => addTenant({ id: "tenant-three", displayName: "Three" }, { rootDir: maxRoot, maxTenants: 2 }), /Tenant limit reached/);
 ok("max tenants enforced");
 
-// 13. Setup creates a tenant and five steps, never asks for a password or key.
+// 13. Setup creates a tenant and six steps, never asks for a password or key.
 const setupRoot = path.join(tmp, "setup");
 fs.mkdirSync(setupRoot, { recursive: true });
 const setup = setupTenant({ id: "dana-lee", displayName: "Dana Lee" }, { rootDir: setupRoot });
 assert.equal(setup.tenant.id, "dana-lee");
-assert.equal(setup.steps.length, 5);
+assert.equal(setup.steps.length, 6);
 assert.ok(!setup.steps.join(" ").match(/enter your (password|key)|type your (password|key)/i));
 assert.ok(setup.steps.join(" ").includes("never asks for your password"));
+assert.ok(setup.steps.join(" ").includes("model-connect --model chatgpt"));
 assert.ok(getTenant("dana-lee", setupRoot));
-ok("setup creates a tenant and five steps, never asks for a password or key");
+ok("setup creates a tenant and six steps, never asks for a password or key");
 
 // 14. Migration preserves projects and audit events and is idempotent.
 const migRoot = path.join(tmp, "migrate");

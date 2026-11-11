@@ -113,15 +113,16 @@ assert.strictEqual(isBrowserWired("grok"), false, "isBrowserWired must be false 
 assert.strictEqual(isBrowserWired("no-such-model"), false, "isBrowserWired must be false for an unknown model");
 ok("subscription and browser-wired helpers work");
 
-// Test 4: a fresh tenant seeds chatgpt and claude connected, and the file
-// is written to that tenant's own state directory.
+// Test 4: a fresh tenant starts with ZERO connected models (V1.7 fix).
+// No auto-seed: the file is written as an empty list on first read, and
+// nothing is connected until the user runs model-connect for it.
 const seeded = loadConnectedIds(ctxA);
-assert.deepStrictEqual(seeded, ["chatgpt", "claude"], "A fresh tenant must seed chatgpt and claude connected");
+assert.deepStrictEqual(seeded, [], "A fresh tenant must start with zero connected models");
 assert.ok(fs.existsSync(modelsFilePath(ctxA)), "models.json must be written on first read");
-assert.deepStrictEqual(JSON.parse(fs.readFileSync(modelsFilePath(ctxA), "utf-8")), ["chatgpt", "claude"], "Seeded file must hold only the two default ids");
-assert.strictEqual(isModelConnected(ctxA, "chatgpt"), true, "chatgpt must be connected for a fresh tenant");
+assert.deepStrictEqual(JSON.parse(fs.readFileSync(modelsFilePath(ctxA), "utf-8")), [], "Fresh file must hold an empty list");
+assert.strictEqual(isModelConnected(ctxA, "chatgpt"), false, "chatgpt must NOT be connected for a fresh tenant");
 assert.strictEqual(isModelConnected(ctxA, "gemini"), false, "gemini must start disconnected for a fresh tenant");
-ok("fresh tenant seeds chatgpt and claude connected");
+ok("fresh tenant starts with zero connected models, no auto-seed");
 
 // Test 5: connect then packet works for gemini and grok, and the packet
 // names the model and its chat URL.
@@ -207,7 +208,7 @@ const connectedA = listConnectedModels(ctxA).map((m) => m.id);
 assert.ok(connectedA.includes("gemini"), "Tenant A list must include gemini");
 assert.ok(connectedA.includes("grok"), "Tenant A list must include grok");
 const connectedB = listConnectedModels(ctxB).map((m) => m.id);
-assert.deepStrictEqual(connectedB, ["chatgpt", "claude"], "Tenant B list must hold only the seeded defaults");
+assert.deepStrictEqual(connectedB, [], "Tenant B list must be empty: a fresh tenant starts with zero connected models");
 assert.ok(!fs.existsSync(path.join(ctxB.stateDir, "models.json")) || JSON.parse(fs.readFileSync(modelsFilePath(ctxB), "utf-8")).every((id) => ["chatgpt", "claude"].includes(id)), "Tenant B file must never contain tenant A's models");
 ok("connect is per tenant");
 
@@ -215,11 +216,13 @@ ok("connect is per tenant");
 assert.throws(() => connectModel(ctxA, "openai-api"), /API model.*separate flow/, "Connecting an API model must be refused");
 assert.throws(() => connectModel(ctxA, "gemini-api"), /API model/, "Connecting gemini-api must be refused");
 assert.throws(() => connectModel(ctxA, "no-such-model"), /not known/, "Connecting an unknown model must be refused");
-assert.deepStrictEqual(loadConnectedIds(ctxA), ["chatgpt", "claude", "gemini", "grok"], "Failed connects must not change the connected list");
+assert.deepStrictEqual(loadConnectedIds(ctxA), ["gemini", "grok"], "Failed connects must not change the connected list");
 ok("connect rejects an API model and an unknown model");
 
 // Test 13: disconnect refuses chatgpt while it has an active browser
 // account, and allows it when there is none.
+connectModel(ctxA, "chatgpt");
+assert.strictEqual(isModelConnected(ctxA, "chatgpt"), true, "chatgpt must be connected before the disconnect test");
 assert.throws(
   () => disconnectModel(ctxA, "chatgpt", { hasActiveAccount: true }),
   /still has an active browser account/,

@@ -1,6 +1,11 @@
 # Install TrustyMUSE Harness
 
-TrustyMUSE Harness V1.6. Local only, multi-tenant. One install serves
+New here? Start with `docs/GETTING-STARTED.md` for a complete beginner
+walkthrough, then `docs/USER-GUIDE.md` for every command,
+`docs/FAQ.md` for common questions, and `docs/TROUBLESHOOTING.md` when
+something fails. The full index is in `docs/README.md`.
+
+TrustyMUSE Harness V1.7. Local only, multi-tenant. One install serves
 many Muse accounts, each tenant fully isolated. There is no central
 server and no public Muse account API in V1.4. Each Muse account runs
 its own copy of the harness in its own Muse workspace.
@@ -24,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V1.6 runs 82 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15.
+All test suites must pass before you use it. V1.7 runs 91 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9.
 
 If Chromium is missing for browser mode, install it with:
 
@@ -48,15 +53,10 @@ trustymuse-harness status
 One tenant is one Muse account. Run the setup wizard once:
 
 ```bash
-npm run setup -- --id <your-id> --name "<Your Name>"
+node dist/index.js setup --id <your-id> --name "<Your Name>"
 ```
 
-For example: `npm run setup -- --id jane-doe --name "Jane Doe"`.
-Or use the built binary directly:
-
-```bash
-node dist/index.js setup --id jane-doe --name "Jane Doe"
-```
+For example: `node dist/index.js setup --id jane-doe --name "Jane Doe"`.
 
 Setup creates your tenant, writes config.yaml from config.example.yaml
 when one is missing, and makes your tenant the default. It never asks
@@ -65,8 +65,8 @@ for a password or an API key. Then:
 1. Connect your own chat AI models (no API key, packet mode works at once):
    `node dist/index.js model-connect --model gemini`
    `node dist/index.js model-connect --model grok`
-   ChatGPT and Claude are already connected for every tenant. The other
-   seven start disconnected and connect with model-connect.
+   All nine models start disconnected for a fresh tenant. Connect each
+   one you want with model-connect.
 2. For browser mode only (chatgpt and claude only, the rest are
    packet-only), add a browser account, log in once by hand in that
    profile, in your own browser, then verify it with browser-connect.
@@ -157,8 +157,12 @@ instead.
   account. Each Muse account runs its own copy of the harness.
 - V1.4 does NOT create a hosted team server. There is no shared
   dashboard, no shared queue, and no cross-account job routing.
-- V1.6 browser Connect and Disconnect are CLI only. The panel buttons
-  come later; the panel reads the same per-account connection state.
+- V1.6 browser Connect and Disconnect are in the CLI, and the
+  TrustyHarness panel has Connect and Disconnect buttons too. The panel
+  cannot run the Playwright driver, so panel Connect records pending
+  verification and only a CLI `browser-connect` can flip an account to
+  connected, after the driver verifies the login. See
+  `docs/V1-6-BROWSER-CONNECT.md` and `docs/USER-GUIDE.md`.
 - No live prompt has been sent through the Playwright driver yet.
   The first live driver job is still untested.
 - See `docs/V1-4-MULTI-TENANT.md` for what a future hosted team
