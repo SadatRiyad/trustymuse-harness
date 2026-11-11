@@ -10,7 +10,7 @@ Version 1.7.0. Start here. Each document says who it is for in one line.
 - [`USER-GUIDE.md`](USER-GUIDE.md): for every user. The full command
   reference, with flags, real examples, packet mode vs browser mode,
   budget, HOLD, the audit log, and what each command refuses and why.
-- [`FAQ.md`](FAQ.md): for anyone with a question. Twenty short answers,
+- [`FAQ.md`](FAQ.md): for anyone with a question. 21 short answers,
   drawn only from verified facts, including the 404, tenant ids, the
   cloud login, pending connect, disconnect, cap 0, CAPTCHA, Chromium
   install, and cross-account control.
