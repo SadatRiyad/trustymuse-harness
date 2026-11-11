@@ -1,6 +1,12 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-11. Status: V1.7 local only, multi-tenant, public repo. Version 1.7.0. No deploy, no live paid API, no credential stored, no live prompt sent yet.
+Date: 2026-11-12. Status: V1.8 local only, multi-tenant, public repo. Version 1.8.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet.
+
+## What V1.8 adds: Analytics Phase 1, Local Collector, Dry-Run Preview Only
+
+- New module `src/analytics/collector.ts`: builds one JSON payload per install from local counts only, covering the last 24 hours. Payload version 1, install id is one random UUID stored in gitignored `state/analytics.json`, never identity. The collector never reads an audit event's detail field, and never reads a project name, an account label, a tenant name, an email, or a credential. It holds no remote-call code at all. See `docs/V1-8-ANALYTICS-PHASE-1.md`.
+- CLI: `analytics-preview` (prints the exact payload, sends nothing), `analytics-status` (shows off, install id, collector readiness, last preview, last send never), `analytics-enable` (refused until Phase 2 builds the central service), `analytics-disable` (no-op that confirms nothing is being sent).
+- New tests in `tests/run-analytics-tests.mjs`, 11 groups, temp dirs only, no live network. `npm test` now runs 102 groups.
 
 ## What V1.7 adds: Connected Means Packet Only
 

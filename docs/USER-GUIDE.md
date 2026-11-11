@@ -1,6 +1,6 @@
 # TrustyMUSE Harness User Guide
 
-Version 1.7.0. This is the full command reference. Every command runs as
+Version 1.8.0. This is the full command reference. Every command runs as
 `node dist/index.js <command>`. Run `npm run build` or `npm test` first so
 `dist/` exists. Run `node dist/index.js help` at any time to see the same
 list in the terminal.
@@ -20,6 +20,7 @@ closed before any state is read or written.
 - [Packets and browser jobs](#packets-and-browser-jobs)
 - [Projects](#projects)
 - [Audit and checks](#audit-and-checks)
+- [Analytics (Phase 1, preview only)](#analytics-phase-1-preview-only)
 - [Packet mode vs browser mode](#packet-mode-vs-browser-mode)
 - [Budget](#budget)
 - [HOLD and policy](#hold-and-policy)
@@ -611,7 +612,57 @@ Example audit event names: `status_checked`, `packet_generated`,
 `browser_blocked_packet_only`, `browser_blocked_disabled`,
 `browser_blocked_project_scope`, `browser_blocked_not_connected`,
 `project_added`, `project_removed`, `project_paused`, `model_connected`,
-`model_disconnect_blocked`, `tenant_migrated`.
+`model_disconnect_blocked`, `tenant_migrated`, `analytics_preview`,
+`analytics_status_checked`, `analytics_enable_refused`,
+`analytics_disabled`.
+
+## Analytics (Phase 1, preview only)
+
+Analytics Phase 1 is a local collector with a dry-run preview only.
+There is no sending code and no central service yet. See
+`V1-8-ANALYTICS-PHASE-1.md`.
+
+### analytics-preview
+
+```bash
+node dist/index.js analytics-preview [--tenant <id>]
+```
+
+Builds the exact JSON payload that would be sent, from local counts
+only, and prints it. It sends nothing. The payload holds counts only
+and never holds prompt text, results, project names, account labels,
+emails, or credentials. Running it stores a random install id in
+gitignored `state/analytics.json` (never identity) and stamps the last
+preview time. The command is audit logged to the resolved tenant only.
+
+### analytics-status
+
+```bash
+node dist/index.js analytics-status [--tenant <id>]
+```
+
+Shows analytics off, the install id (or that it is not generated yet),
+payload version 1, collector readiness, last preview time, and last
+send never. Phase 1 sends nothing.
+
+### analytics-enable
+
+```bash
+node dist/index.js analytics-enable [--tenant <id>]
+```
+
+Refused. The central service is not built yet (Phase 2), so nothing
+can be enabled and nothing is sent. The refusal is audit logged.
+
+### analytics-disable
+
+```bash
+node dist/index.js analytics-disable [--tenant <id>]
+```
+
+A no-op that confirms analytics is off and nothing is being sent. It
+changes nothing. The stored install id is kept, so Phase 2 can reuse
+it. The confirmation is audit logged.
 
 ## Packet mode vs browser mode
 

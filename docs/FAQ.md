@@ -1,6 +1,6 @@
 # TrustyMUSE Harness FAQ
 
-Version 1.7.0. Short answers, drawn only from what the harness does and
+Version 1.8.0. Short answers, drawn only from what the harness does and
 what has been verified. If an answer says something is not verified, that
 is the answer. Do not assume otherwise.
 
@@ -205,7 +205,7 @@ working folder. Never run a live browser job while the tests fail.
 ## 20. How do I update to a new version?
 
 Pull the latest code from the public repo, run `npm install`, then run
-`npm test`. All 91 test groups must pass before you use the new version.
+`npm test`. All 102 test groups must pass before you use the new version.
 Your state lives under `state/tenants/<your-id>/` and `profiles/`, and
 those folders are gitignored, so a pull does not touch them. Check the
 new version number in `package.json` and read the new `V1-*.md` notes
@@ -227,3 +227,20 @@ Connected still means only one thing: the model is enabled for packet
 mode for your tenant. It is not a live login, not a stored token, and
 not a live call. For ChatGPT and Claude, run `browser-status` to check
 the live browser verification. See `V1-7-CONNECTED-MEANS.md`.
+
+## 22. What does analytics-preview send?
+
+Nothing. `analytics-preview` builds the exact JSON payload that would
+be sent and prints it, so you can read it before anything is ever
+enabled. It sends nothing, because Phase 1 has no sending code and
+the central service does not exist yet. The payload holds counts only:
+tenant count, connected model ids, job counts by type and model,
+packet and browser job counts, jobs ok and failed, results validated,
+error categories, budget bands, browser account counts, active project
+count, last active day, platform family, and Node major version. It
+never holds prompt text, result text, file contents, project names or
+paths, account labels, tenant names, emails, or credentials. The
+collector never reads an audit event's detail field. `analytics-enable`
+is refused until Phase 2 builds the central service, and
+`analytics-disable` is a no-op that confirms nothing is being sent.
+See `V1-8-ANALYTICS-PHASE-1.md`.

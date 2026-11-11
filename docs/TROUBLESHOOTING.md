@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Troubleshooting
 
-Version 1.7.0. Each entry has a symptom, a cause, and an exact fix. Read
+Version 1.8.0. Each entry has a symptom, a cause, and an exact fix. Read
 the symptom that matches what you see. Do not retry a failed step in a
 loop. Find the cause first.
 

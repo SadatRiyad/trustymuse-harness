@@ -5,7 +5,7 @@ walkthrough, then `docs/USER-GUIDE.md` for every command,
 `docs/FAQ.md` for common questions, and `docs/TROUBLESHOOTING.md` when
 something fails. The full index is in `docs/README.md`.
 
-TrustyMUSE Harness V1.7. Local only, multi-tenant. One install serves
+TrustyMUSE Harness V1.8. Local only, multi-tenant. One install serves
 many Muse accounts, each tenant fully isolated. There is no central
 server and no public Muse account API in V1.4. Each Muse account runs
 its own copy of the harness in its own Muse workspace.
@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V1.7 runs 91 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9.
+All test suites must pass before you use it. V1.8 runs 102 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11.
 
 If Chromium is missing for browser mode, install it with:
 

@@ -54,8 +54,19 @@ import {
   setupTenant,
 } from "./tenants/tenants";
 import { createTenantContext, tenantCapUsd, TenantContext } from "./tenants/context";
+import {
+  buildAnalyticsPayload,
+  PAYLOAD_VERSION,
+  readAnalyticsState,
+  recordPreview,
+} from "./analytics/collector";
 
-// TrustyMUSE Harness V1.7 CLI. Local only, multi-tenant.
+// TrustyMUSE Harness V1.8 CLI. Local only, multi-tenant.
+// V1.8 adds Analytics Phase 1: a local collector with a dry-run preview
+// only (see docs/V1-8-ANALYTICS-PHASE-1.md). analytics-preview prints the
+// exact payload that would be sent and sends nothing. There is no
+// sending code yet, and the central service does not exist, so
+// analytics-enable is refused until Phase 2.
 // V1.7 removes the auto-seed: a fresh tenant starts with zero connected
 // models, and a model connects only through an explicit model-connect
 // (see docs/V1-7-CONNECTED-MEANS.md). V1.6 adds browser Connect and
@@ -110,7 +121,7 @@ function getArg(args: string[], name: string, fallback: string): string {
 }
 
 function printHelp(): void {
-  console.log("TrustyMUSE Harness V1.7");
+  console.log("TrustyMUSE Harness V1.8");
   console.log("Usage:");
   console.log("  node dist/index.js status [--tenant <id>]");
   console.log("  node dist/index.js packet --model chatgpt --type seo --title \"Title\" --task \"Task text\" [--project my-project] [--tenant <id>]");
@@ -141,9 +152,14 @@ function printHelp(): void {
   console.log("  node dist/index.js model-list [--tenant <id>]");
   console.log("  node dist/index.js model-connect --model gemini [--tenant <id>]");
   console.log("  node dist/index.js model-disconnect --model gemini [--tenant <id>]");
+  console.log("  node dist/index.js analytics-preview [--tenant <id>]");
+  console.log("  node dist/index.js analytics-status [--tenant <id>]");
+  console.log("  node dist/index.js analytics-enable [--tenant <id>]");
+  console.log("  node dist/index.js analytics-disable [--tenant <id>]");
   console.log("");
   console.log("Modes: subscription is on by default. API is off by default and blocked when budget cap is 0.");
   console.log("Models: 9 subscription models (chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral). Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude; the rest are packet-only.");
+  console.log("Analytics: Phase 1 is a dry-run preview only. analytics-preview prints the exact payload that would be sent and sends nothing. The central service is not built yet, so analytics-enable is refused until Phase 2.");
   console.log("Browser mode is off by default. Read docs/V1-1-BROWSER-MODE.md before you turn it on.");
   console.log("Projects: connect any running or new project with project-add. Jobs scoped with --project are draft only.");
   console.log("Tenants: one tenant is one Muse account. Tenant is resolved from --tenant, then TRUSTYMUSE_TENANT, then tenants.default in config.yaml, then \"default\".");
@@ -391,7 +407,7 @@ async function main(): Promise<void> {
 
   if (command === "status") {
     const status = budget.getStatus();
-    console.log("TrustyMUSE Harness V1.7 status");
+    console.log("TrustyMUSE Harness V1.8 status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${ctx.tenant.id}), ${tenantCount} tenant(s) on this install`);
     console.log(`Mode: ${config.subscriptionEnabled ? "subscription" : "none"}${config.apiEnabled ? " + api" : ""}${config.browser.enabled ? " + browser" : ""}`);
     console.log(`Browser: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}, headless ${config.browser.headless}, pacing ${config.browser.pacingMs} ms, daily limit ${config.browser.dailyLimitPerAccount} per account, max accounts ${config.browser.maxAccounts}`);
@@ -594,7 +610,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "session-status") {
-    console.log("TrustyMUSE Harness V1.7 browser session status");
+    console.log("TrustyMUSE Harness V1.8 browser session status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Browser mode: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}`);
     console.log(`Headless: ${config.browser.headless}, profile root: ${ctx.profileRoot}`);
@@ -983,7 +999,7 @@ async function main(): Promise<void> {
     for (const project of projects) {
       byStatus[project.status] += 1;
     }
-    console.log("TrustyMUSE Harness V1.7 project status");
+    console.log("TrustyMUSE Harness V1.8 project status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Connected: ${projects.length} of max ${config.projects.maxProjects}. Active ${byStatus.active}, paused ${byStatus.paused}, archived ${byStatus.archived}.`);
     console.log(`Policy HOLD: ${config.hold ? "ON, project writes are blocked" : "OFF"}`);
@@ -1087,6 +1103,63 @@ async function main(): Promise<void> {
         tenantId,
       );
     }
+    return;
+  }
+
+  // Analytics Phase 1, V1.8: local collector, dry-run preview only.
+  // analytics-preview builds the exact payload that would be sent and
+  // prints it. It sends nothing, because there is no sending code yet
+  // and the central service does not exist. analytics-enable is refused
+  // until Phase 2 builds that service. analytics-disable is a no-op
+  // that confirms nothing is being sent. See
+  // docs/V1-8-ANALYTICS-PHASE-1.md.
+  if (command === "analytics-preview") {
+    const payload = buildAnalyticsPayload(rootDir);
+    recordPreview(rootDir);
+    console.log(`Analytics preview for tenant ${tenantId}. Nothing was sent.`);
+    console.log(JSON.stringify(payload, null, 2));
+    console.log("This payload is a dry run only. It was built from local counts, never left this machine, and holds no prompt text, results, project names, account labels, emails, or credentials.");
+    appendAudit(
+      { at: new Date().toISOString(), runId, event: "analytics_preview", result: "ok" },
+      rootDir,
+      tenantId,
+    );
+    return;
+  }
+
+  if (command === "analytics-status") {
+    const state = readAnalyticsState(rootDir);
+    console.log("Analytics: OFF. Phase 1 is a dry-run preview only. The central service is not built yet, so nothing can be enabled and nothing is sent.");
+    console.log(`Install id: ${state ? state.install_id : "not generated yet. Run analytics-preview to generate it."} (a random id, not identity)`);
+    console.log(`Payload version: ${PAYLOAD_VERSION}`);
+    console.log("Collector: ready. It reads local state only and counts, never sends.");
+    console.log(`Last preview: ${state && state.last_preview_at ? state.last_preview_at : "never"}`);
+    console.log("Last send: never. Phase 1 sends nothing.");
+    appendAudit(
+      { at: new Date().toISOString(), runId, event: "analytics_status_checked", result: "ok" },
+      rootDir,
+      tenantId,
+    );
+    return;
+  }
+
+  if (command === "analytics-enable") {
+    console.log("Analytics cannot be enabled yet. The central service is not built (Phase 2). Nothing was enabled and nothing is sent. Use analytics-preview to see the exact payload that would be sent.");
+    appendAudit(
+      { at: new Date().toISOString(), runId, event: "analytics_enable_refused", result: "blocked" },
+      rootDir,
+      tenantId,
+    );
+    return;
+  }
+
+  if (command === "analytics-disable") {
+    console.log("Analytics is off and nothing is being sent. In Phase 1 there is nothing to disable: no data was ever enabled or sent, and no key exists. Nothing was changed. The local install id is kept, so Phase 2 can reuse it.");
+    appendAudit(
+      { at: new Date().toISOString(), runId, event: "analytics_disabled", result: "ok" },
+      rootDir,
+      tenantId,
+    );
     return;
   }
 

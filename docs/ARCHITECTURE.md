@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Architecture
 
-Version 1.7.0. This document is for developers who want to understand how
+Version 1.8.0. This document is for developers who want to understand how
 the harness is built, or how to change it. It maps the design to the code,
 and it states the limits honestly.
 
@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs eight suites, 91 test groups in
+`npm test` builds the code, then runs nine suites, 102 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9. All suites use temp folders only, the mock driver, or
+15, connection 15, model-connect 9, analytics 11. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -343,6 +343,12 @@ fake pages. No suite makes a live network call. The suites are:
 - `tests/run-connection-tests.mjs`: browser connect and disconnect, the
   run-browser gate, per-tenant isolation, HOLD rules, old-record
   backfill, no login detail fields.
+- `tests/run-analytics-tests.mjs`: local collector counts from a
+  synthetic audit log, denylist fields never in the payload, install id
+  generated once, budget bands, empty install gives zero counts, no
+  remote-call code in the analytics module, real CLI preview, status,
+  enable refusal, and disable, tenant isolation, validator refuses an
+  extra field and an over-size payload.
 
 ## Honest limits
 
@@ -365,6 +371,10 @@ every design choice.
   per-tenant encryption, a server-side policy and HOLD gate, server-side
   quotas, an audit log tenants cannot rewrite, and a data-residency and
   deletion story. See `V1-4-MULTI-TENANT.md`.
+- Analytics Phase 1 builds a local payload only. `analytics-preview`
+  prints it and sends nothing, because there is no sending code and no
+  central service yet. `analytics-enable` is refused until Phase 2.
+  See `V1-8-ANALYTICS-PHASE-1.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a

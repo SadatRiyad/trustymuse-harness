@@ -1,5 +1,5 @@
 {
-  "description": "TrustyMUSE Harness V1.7. Local only, multi-tenant. TrustyMUSE is the controller, other models are workers. Subscription mode is on by default, API mode is off by default and blocked when the monthly budget cap is 0. Nine subscription chat models connect with a Connect button: chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral. A fresh tenant starts with zero connected models, and a model connects only through an explicit model-connect. Packet mode works for every connected model; the browser driver is wired only for chatgpt and claude. Browser sessions connect and disconnect per account with a verified login check: browser-connect, browser-disconnect, browser-status. Any running or new project can connect and scope jobs to it. One install serves many Muse accounts, each tenant fully isolated.",
+  "description": "TrustyMUSE Harness V1.8. Local only, multi-tenant. TrustyMUSE is the controller, other models are workers. Subscription mode is on by default, API mode is off by default and blocked when the monthly budget cap is 0. Nine subscription chat models connect with a Connect button: chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral. A fresh tenant starts with zero connected models, and a model connects only through an explicit model-connect. Packet mode works for every connected model; the browser driver is wired only for chatgpt and claude. Browser sessions connect and disconnect per account with a verified login check: browser-connect, browser-disconnect, browser-status. Any running or new project can connect and scope jobs to it. One install serves many Muse accounts, each tenant fully isolated. Analytics Phase 1 is a local collector with a dry-run preview only: analytics-preview prints the exact payload that would be sent and sends nothing, because there is no sending code and no central service yet.",
   "devDependencies": {
     "@types/node": "^22.10.2",
     "typescript": "^5.6.3"
@@ -14,11 +14,11 @@
     "build": "tsc",
     "packet": "node dist/index.js packet",
     "start": "node dist/index.js status",
-    "test": "npm run build && node tests/run-tests.mjs && node tests/run-browser-tests.mjs && node tests/run-live-driver-tests.mjs && node tests/run-project-tests.mjs && node tests/run-tenant-tests.mjs && node tests/run-model-tests.mjs && node tests/run-connection-tests.mjs && node tests/run-model-connect-tests.mjs",
+    "test": "npm run build && node tests/run-tests.mjs && node tests/run-browser-tests.mjs && node tests/run-live-driver-tests.mjs && node tests/run-project-tests.mjs && node tests/run-tenant-tests.mjs && node tests/run-model-tests.mjs && node tests/run-connection-tests.mjs && node tests/run-model-connect-tests.mjs && node tests/run-analytics-tests.mjs",
     "test:browser": "npm run build && node tests/run-browser-tests.mjs"
   },
   "type": "commonjs",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "dependencies": {
     "playwright": "1.65.0"
   },

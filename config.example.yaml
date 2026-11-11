@@ -1,4 +1,4 @@
-# TrustyMUSE Harness V1.7 example config.
+# TrustyMUSE Harness V1.8 example config.
 # Copy this file to config.yaml to change settings.
 # Do not put any API key in this file. Keys only come from environment variables.
 # Monthly budget cap default is 0. With 0, every paid API call is blocked.
@@ -21,7 +21,7 @@
 
 harness:
   name: trustymuse-harness
-  version: 1.7.0
+  version: 1.8.0
   mode: subscription
 
 budget:
