@@ -1,0 +1,56 @@
+# TrustyMUSE Harness V1.6 example config.
+# Copy this file to config.yaml to change settings.
+# Do not put any API key in this file. Keys only come from environment variables.
+# Monthly budget cap default is 0. With 0, every paid API call is blocked.
+# Change the cap later to any amount you choose, in USD.
+# Browser mode is off by default. Read docs/V1-1-BROWSER-MODE.md before you turn it on.
+# It uses your own browser profiles and your own manual login. Muse never sees your password.
+# Browser accounts connect and disconnect with browser-connect and
+# browser-disconnect (V1.6). Connect verifies the login before it claims
+# connected. Disconnect never deletes the profile or logs you out.
+# See docs/V1-6-BROWSER-CONNECT.md.
+# Projects: at most 20 connected projects by default. See docs/V1-3-PROJECTS.md.
+# Tenants: one tenant is one Muse account. The default tenant is used when
+# no --tenant flag and no TRUSTYMUSE_TENANT variable is given. At most 10
+# tenants on one install by default. See docs/V1-4-MULTI-TENANT.md.
+# Models: 9 subscription chat models connect with model-connect, no API key:
+# chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot,
+# mistral. Packet mode works for every connected one. Browser driver is
+# wired only for chatgpt and claude; the rest are packet-only.
+# See docs/V1-5-MODELS.md.
+
+harness:
+  name: trustymuse-harness
+  version: 1.6.0
+  mode: subscription
+
+budget:
+  monthly_cap_usd: 0
+  currency: USD
+  warn_at_percent: 80
+
+api:
+  enabled: false
+
+subscription:
+  enabled: true
+  models: chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral
+
+policy:
+  hold: false
+  require_approval_for: publish, send, merge, deploy
+
+browser:
+  enabled: false
+  headless: true
+  profile_root: ./profiles
+  max_accounts: 3
+  pacing_ms: 8000
+  daily_limit_per_account: 20
+
+projects:
+  max_projects: 20
+
+tenants:
+  default: default
+  max_tenants: 10

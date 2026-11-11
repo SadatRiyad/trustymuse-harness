@@ -1,0 +1,8 @@
+node_modules/
+dist/
+state/
+packets/
+config.yaml
+.env
+profiles/
+browser-results/
