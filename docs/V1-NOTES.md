@@ -2,6 +2,10 @@
 
 Date: 2026-11-14. Status: V2.5.0 local only, multi-tenant, public repo. Version 2.5.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, and the owner is allowlisted.
 
+## What V2.5.2 changes: Hook Scripts in the Repo, Tests Pass on a Fresh Clone
+
+The owner pulled the update on his other Muse and test group 66 failed: the test read the live relay hook script from `~/hooks/scripts/telegram-inbox-watch.sh`, which does not exist on a fresh install, so the suite failed there while passing here. Group 67 had the same flaw with the watchdog script. The fix: both hook scripts are now canonical files in the repo under `hooks/` (`hooks/telegram-inbox-watch.sh`, `hooks/telegram-bot-watchdog.sh`), and groups 66 and 67 read the repo copies, never the installed hook. The installed copies under `~/hooks/scripts/` are the same files, copied during setup. No behaviour change. The owner was right not to install the hook on the other Muse just to make the test pass: the script alone does not make the relay live (it also needs the hook registration, a running bot with a token, and an allowlist on that account), and the test was the bug, not the missing install.
+
 ## What V2.5.1 changes: Relay Cron Relaxed to Every 5 Minutes
 
 The owner asked why Telegram replies were late. The cause was queueing: every relay run is a full agent run that takes minutes even with an empty inbox, and a 1-minute cron plus hook wakes kept queueing runs behind each other (one run in progress, one queued, hook logs full of "relay already running", one run started 4 minutes late). The auto-restart watchdog was not the cause: it only wakes an agent when the bot is dead. The fix: the relay cron moves from every 1 minute to every 5 minutes. The live hook stays the fast path, the cron stays as a safety net only. No behaviour change beyond the schedule.

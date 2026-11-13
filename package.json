@@ -18,7 +18,7 @@
     "test:browser": "npm run build && node tests/run-browser-tests.mjs"
   },
   "type": "commonjs",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "dependencies": {
     "playwright": "1.65.0"
   },

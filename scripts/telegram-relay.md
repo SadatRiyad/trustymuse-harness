@@ -285,8 +285,8 @@ Since V2.4, a runtime hook wakes the relay the moment a new message
 lands, instead of waiting for the next 1-minute run.
 
 - Hook id `telegram-live-relay`, poll interval 10 seconds. Script:
-  `~/hooks/scripts/telegram-inbox-watch.sh` (the script lives
-  outside the repo, under the hooks dir, not in the harness).
+  `hooks/telegram-inbox-watch.sh` in the repo, copied to
+  `~/hooks/scripts/telegram-inbox-watch.sh` when the hook is set up.
 - The script reads only `state/telegram-inbox.jsonl` with `jq`,
   looks for lines with status `new`, and wakes only when a
   `messageId` appears that it has not seen before. It keeps a

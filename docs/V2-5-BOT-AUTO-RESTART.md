@@ -20,8 +20,11 @@ only through the supervisor, which never starts a second bot while one
 is running.
 
 - Hook: `telegram-bot-watchdog`, poll every 30 seconds.
-- Script: `~/hooks/scripts/telegram-bot-watchdog.sh` (outside the repo,
-  under the hooks dir, like the live relay script).
+- Script: `hooks/telegram-bot-watchdog.sh` in the repo, copied to
+  `~/hooks/scripts/telegram-bot-watchdog.sh` when the hook is set up.
+  The installed copy is the same file; the repo copy is the canonical
+  one, so the tests read it and pass on a fresh clone with no hook
+  installed.
 - Worker prompt: self-contained, points at the supervisor, verifies the
   restart, stays silent for routine restarts, reports only when it gives
   up. Delivery: this side chat.

@@ -1875,8 +1875,11 @@ function makeChatBot(root) {
 // 66. Live relay hook script: protocol lines, no token-like pattern,
 // and the watermark logic on a scratch inbox with a stub runtime.
 // Temp dirs only, never the real inbox, never api.telegram.org.
+// The test reads the repo copy under hooks/, never the installed hook
+// under ~/hooks/scripts/, so it passes on a fresh clone with no hook
+// installed. The installed copy is the same file, copied during setup.
 {
-  const hookScript = path.join(os.homedir(), "hooks", "scripts", "telegram-inbox-watch.sh");
+  const hookScript = path.join(rootDir, "hooks", "telegram-inbox-watch.sh");
   assert.ok(fs.existsSync(hookScript), "hook script exists");
   fs.accessSync(hookScript, fs.constants.X_OK);
   const scriptText = fs.readFileSync(hookScript, "utf-8");
@@ -2003,9 +2006,12 @@ function makeChatBot(root) {
 // 67. Bot watchdog hook script: protocol lines, no token-like pattern,
 // and the detection logic on scratch pid and heartbeat files with a
 // stub runtime. Temp dirs only, never the real bot state, never
-// api.telegram.org.
+// api.telegram.org. The test reads the repo copy under hooks/, never
+// the installed hook under ~/hooks/scripts/, so it passes on a fresh
+// clone with no hook installed. The installed copy is the same file,
+// copied during setup.
 {
-  const hookScript = path.join(os.homedir(), "hooks", "scripts", "telegram-bot-watchdog.sh");
+  const hookScript = path.join(rootDir, "hooks", "telegram-bot-watchdog.sh");
   assert.ok(fs.existsSync(hookScript), "watchdog script exists");
   fs.accessSync(hookScript, fs.constants.X_OK);
   const scriptText = fs.readFileSync(hookScript, "utf-8");

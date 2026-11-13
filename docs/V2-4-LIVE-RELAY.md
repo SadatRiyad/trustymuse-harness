@@ -10,7 +10,7 @@ The owner asked a plain question: when he writes in the Telegram bot, the reply 
 
 A runtime hook, id `telegram-live-relay`, poll interval 10 seconds.
 
-- Hook script: `~/hooks/scripts/telegram-inbox-watch.sh`. The script lives outside the harness repo, under the hooks dir, because hooks live under `~/hooks/scripts/` with state under `~/hooks/state/`.
+- Hook script: `hooks/telegram-inbox-watch.sh` in the repo, copied to `~/hooks/scripts/telegram-inbox-watch.sh` when the hook is set up. The installed copy is the same file; the repo copy is the canonical one, so the tests read it and pass on a fresh clone with no hook installed.
 - The script follows the hook protocol exactly: `#!/usr/bin/env bash`, `set -euo pipefail`, it sources `$HATCH_HOOK_RUNTIME`, it locks with `flock` on the hook state dir, and it ends with exactly one `silent` or `wake` call.
 - Each poll it reads `state/telegram-inbox.jsonl` with `jq` and looks for lines with status `new`. It wakes only when a `messageId` appears that it has not seen before. It keeps a watermark of seen message ids in the hook state dir, never in the harness state, and never reads message text into the payload: the wake payload holds only the new message ids and their count.
 - A dry run (`HATCH_HOOK_DRY_RUN=1`) never writes the watermark, so it never consumes a detection. The decision is still reported, but the next real poll wakes for the same ids.
