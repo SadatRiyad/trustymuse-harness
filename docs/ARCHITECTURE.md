@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs ten suites, 152 test groups in
+`npm test` builds the code, then runs ten suites, 167 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9, analytics 11, telegram 50. All suites use temp folders only, the mock driver, or
+15, connection 15, model-connect 9, analytics 11, telegram 65. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -364,7 +364,12 @@ fake pages. No suite makes a live network call. The suites are:
   confirmation. V2.1 adds the heartbeat on every poll, the poll loop
   never overlapping getUpdates, the 15-second 409 backoff, the
   supervisor start, stop, adopt, and status, and telegram-status never
-  printing a token, all in temp dirs with a mock API only.
+  printing a token, all in temp dirs with a mock API only. V2.2 adds
+  chat mode: plain text is queued in the inbox with one fixed
+  acknowledgement, outbox lines are sent exactly once and marked sent,
+  long replies are split into numbered parts, the thread file keeps the
+  last 20 messages and never holds secret-like text, and the relay CLI
+  counts are right without ever printing message text.
 
 ## Honest limits
 
@@ -402,8 +407,13 @@ every design choice.
   starts the bot through `scripts/telegram-bot-supervisor.sh`, which
   `telegram-start` and the panel Start button share, and the bot writes
   a heartbeat to `state/telegram-heartbeat.json` on every poll. A live
-  bot is running on the owner's install, started by hand before V2.1.
-  See `V2-1-BOT-START-FROM-PANEL.md`.
+  bot is running on the owner's install, restarted on V2.1 code with
+  the panel Start button, and the owner is allowlisted. V2.2 makes
+  Telegram a Muse channel: plain text is queued in the inbox for a
+  scheduled relay job run by Muse, which answers it and writes the
+  reply to the outbox for the bot to deliver. The relay cron job is
+  created after the V2.2 build. See
+  `V2-2-TELEGRAM-MUSE-CHANNEL.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a

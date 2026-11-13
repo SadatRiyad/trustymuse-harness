@@ -67,9 +67,9 @@ things the harness needs.
 npm test
 ```
 
-Success looks like this: all 152 test groups pass. The groups are V1 7,
+Success looks like this: all 167 test groups pass. The groups are V1 7,
 browser 10, live driver 9, projects 12, tenants 14, models 15,
-connection 15, model-connect 9, analytics 11, and telegram 50. Do not use the harness until the tests pass. If a test
+connection 15, model-connect 9, analytics 11, and telegram 65. Do not use the harness until the tests pass. If a test
 fails, see `TROUBLESHOOTING.md`.
 
 The test command also builds the code first, so after `npm test` the

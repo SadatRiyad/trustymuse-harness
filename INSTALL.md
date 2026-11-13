@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V2.1 runs 152 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 50.
+All test suites must pass before you use it. V2.2 runs 167 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 65.
 
 If Chromium is missing for browser mode, install it with:
 
@@ -84,7 +84,7 @@ for a password or an API key. Then:
 5. Check the audit log:
    `node dist/index.js audit`
 
-## Telegram full control (V2.1)
+## Telegram full control (V2.2)
 
 Control the whole harness from your phone with a Telegram Bot. Create the bot
 with @BotFather in Telegram, then set the token in the environment:
@@ -119,12 +119,17 @@ Send `/start` again and the bot replies. From Telegram you can check status,
 models, projects, browser, analytics, and audit, create tasks and packets,
 add, remove, and pause projects, connect and disconnect models, turn HOLD on
 and off, run one browser job at a time on a connected account with `/run`,
-and give plain-language instructions with `/do`. The bot never deploys,
-publishes, merges, or sends anything. Stop it any time with
-`telegram-stop`. See `docs/V2-1-BOT-START-FROM-PANEL.md` for the
-supervisor contract, the heartbeat, and the poll loop fix, and
+and give plain-language instructions with `/do`. You can also just talk:
+plain text that is not a command is queued for a scheduled relay job run
+by Muse, which answers it within about 2 to 4 minutes. The bot never
+deploys, publishes, merges, or sends anything. Stop it any time with
+`telegram-stop`. See `docs/V2-2-TELEGRAM-MUSE-CHANNEL.md` for chat mode,
+the inbox and outbox queues, and the relay contract,
+`docs/V2-1-BOT-START-FROM-PANEL.md` for the supervisor contract, the
+heartbeat, and the poll loop fix, and
 `docs/V2-0-TELEGRAM-FULL-CONTROL.md` for the full command list, the `/do`
-patterns, and the deploy gate.
+patterns, and the deploy gate. The relay cron job is created after the
+V2.2 build; until then, chat messages queue and wait.
 
 ## What is per tenant, and what is shared
 

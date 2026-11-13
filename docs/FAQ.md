@@ -321,3 +321,19 @@ heartbeat last poll time. The bot writes a heartbeat to
 RUNNING or STOPPED honestly. If a bot is already running,
 `telegram-start` adopts it into `state/telegram-bot.pid` instead of
 starting a duplicate. See `V2-1-BOT-START-FROM-PANEL.md`.
+
+## 28. Can I talk to Muse in Telegram in plain words, not commands?
+
+Yes, since V2.2. Plain text that is not a command is a chat message.
+The bot queues it and replies at once with "Got it. Muse will reply
+here." A scheduled relay job run by Muse answers it within about 2 to
+4 minutes, and the bot delivers the reply. Commands still work exactly
+as before. Only allowlisted users can chat. The relay runs with the
+same tools Muse has in the app: it can build a space, run harness
+jobs, and read files. It never deploys, pushes, merges, publishes, or
+sends anything: those steps need your approval in the Muse app, and
+approval cards live there, never in Telegram. The relay cron job is
+created after the V2.2 build; until then, chat messages queue and
+wait. Check the relay with `telegram-relay-status`, `telegram-inbox`,
+and `telegram-outbox`. See `V2-2-TELEGRAM-MUSE-CHANNEL.md` and
+`scripts/telegram-relay.md`.

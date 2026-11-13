@@ -64,3 +64,6 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
 - [`V2-1-BOT-START-FROM-PANEL.md`](V2-1-BOT-START-FROM-PANEL.md):
   the bot starts from the dashboard, the supervisor contract, the
   heartbeat, and the poll loop fix for HTTP 409.
+- [`V2-2-TELEGRAM-MUSE-CHANNEL.md`](V2-2-TELEGRAM-MUSE-CHANNEL.md):
+  Telegram as a Muse channel, chat mode, the inbox and outbox queues,
+  the relay contract, and the thread file.

@@ -669,9 +669,24 @@ it. The confirmation is audit logged.
 
 Control the whole harness from Telegram with a bot you own. The bot uses long
 polling only, no webhook, no public server. See
-`V2-1-BOT-START-FROM-PANEL.md` for the supervisor contract, the heartbeat,
-and the poll loop fix, and `V2-0-TELEGRAM-FULL-CONTROL.md` for the full
-command list, `/do`, and the deploy gate.
+`V2-2-TELEGRAM-MUSE-CHANNEL.md` for chat mode, the inbox and outbox
+queues, and the relay contract, `V2-1-BOT-START-FROM-PANEL.md` for the
+supervisor contract, the heartbeat, and the poll loop fix, and
+`V2-0-TELEGRAM-FULL-CONTROL.md` for the full command list, `/do`, and
+the deploy gate.
+
+### Chat mode
+
+Plain text that is not a command is a chat message. Just talk: the bot
+queues the message in the inbox and replies at once with "Got it. Muse
+will reply here." A scheduled relay job run by Muse answers it within
+about 2 to 4 minutes, and the bot delivers the reply. Commands still
+run at once, with no wait. Only allowlisted users can chat. The chat
+rate limit is 10 messages per user per 10 minutes, separate from the
+20-per-minute command limit. Check the relay with
+`telegram-relay-status`, `telegram-inbox`, and `telegram-outbox`. The
+relay cron job is created after the V2.2 build; until then, chat
+messages queue and wait.
 
 ### telegram-start
 
@@ -709,6 +724,27 @@ Prints RUNNING or STOPPED, the pid, the token source, the allowlist
 count, and the heartbeat last poll time. The token value is never
 printed. The heartbeat is written by the bot to
 `state/telegram-heartbeat.json` on every poll.
+
+### telegram-relay-status
+
+```bash
+node dist/index.js telegram-relay-status
+```
+
+Prints the chat mode relay state: inbox pending count, outbox pending
+count, and the last relay run time if the relay has run. Prints only
+counts and times, never any message text.
+
+### telegram-inbox and telegram-outbox
+
+```bash
+node dist/index.js telegram-inbox [--show-text]
+node dist/index.js telegram-outbox [--show-text]
+```
+
+List pending inbox messages and pending outbox replies with id, user
+id, and time. The full text is shown only with `--show-text`, so a
+routine status check never prints the user's words into a terminal log.
 
 ### telegram-token-status
 

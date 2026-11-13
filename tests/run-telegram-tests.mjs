@@ -31,6 +31,7 @@ const {
   auditPassedByMarkers,
   tokenizeArgs,
   truncateForTelegram,
+  splitTelegramMessage,
   readTelegramHeartbeat,
   writeTelegramHeartbeat,
   readTelegramPid,
@@ -38,6 +39,17 @@ const {
   getTelegramBotStatus,
   findTelegramBotPids,
   isProcessAlive,
+  readTelegramInbox,
+  appendTelegramInbox,
+  readTelegramOutbox,
+  appendTelegramOutbox,
+  loadTelegramThread,
+  appendTelegramThreadMessage,
+  containsSecretLikeText,
+  readTelegramRelayStatus,
+  telegramInboxPendingCount,
+  telegramOutboxPendingCount,
+  TELEGRAM_CHAT_ACK,
   TELEGRAM_POLL_TIMEOUT_SECONDS,
   TELEGRAM_POLL_ABORT_EXTRA_MS,
   TELEGRAM_POLL_RETRY_MS,
@@ -1524,6 +1536,340 @@ function copyRealDist(scratch) {
     }
   }
   ok("a parent shell holding the bot words is never mistaken for the bot");
+}
+
+// V2.2 groups: chat mode, inbox, outbox, threads, relay CLI.
+
+function makeChatBot(root) {
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  return { root, ctx, config, api, bot };
+}
+
+// 51. Chat text is queued with the right fields, the acknowledgement is
+// sent, and the thread holds the user's message.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-queue"));
+  await bot.handleUpdate(makeUpdate(7, 111, "Hello, open a gym food tab for me"));
+  assert.equal(api.sent.length, 1);
+  assert.equal(api.sent[0].text, TELEGRAM_CHAT_ACK);
+  const inbox = readTelegramInbox(root);
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].messageId, 7);
+  assert.equal(inbox[0].telegramUserId, 111);
+  assert.equal(inbox[0].text, "Hello, open a gym food tab for me");
+  assert.equal(inbox[0].status, "new");
+  assert.equal(inbox[0].attempts, 0);
+  assert.ok(typeof inbox[0].receivedAt === "string");
+  const thread = loadTelegramThread(root, 111);
+  assert.equal(thread.messages.length, 1);
+  assert.equal(thread.messages[0].role, "user");
+  assert.equal(thread.messages[0].text, "Hello, open a gym food tab for me");
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_chat_queued");
+  assert.ok(!events[0].detail.includes("gym food"));
+  ok("chat text is queued with the right fields and the acknowledgement is sent");
+}
+
+// 52. Commands are not queued in the inbox.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-no-command"));
+  await bot.handleUpdate(makeUpdate(1, 111, "/status"));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("TrustyMUSE Harness"));
+  assert.equal(readTelegramInbox(root).length, 0);
+  ok("commands are not queued in the inbox");
+}
+
+// 53. Non-allowlisted chat gets no reply and is not queued.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-unauth"));
+  await bot.handleUpdate(makeUpdate(1, 999, "Hello there"));
+  assert.equal(api.sent.length, 0);
+  assert.equal(readTelegramInbox(root).length, 0);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_unauthorized");
+  ok("non-allowlisted chat gets no reply and is not queued");
+}
+
+// 54. Chat rate limit triggers on the 11th message in 10 minutes.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-rate"));
+  for (let i = 1; i <= 10; i++) {
+    await bot.handleUpdate(makeUpdate(i, 111, `message ${i}`));
+  }
+  assert.equal(readTelegramInbox(root).length, 10);
+  assert.equal(api.sent.length, 10);
+  await bot.handleUpdate(makeUpdate(11, 111, "message 11"));
+  assert.equal(readTelegramInbox(root).length, 10);
+  assert.equal(api.sent.length, 11);
+  assert.ok(api.sent[10].text.includes("sending messages faster"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.filter((e) => e.event === "telegram_chat_rate_limited").length, 1);
+  ok("chat rate limit triggers on the 11th message in 10 minutes");
+}
+
+// 55. Chat rate limit stays silent after the first slow-down reply, and
+// works again once the window passes.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-rate-silent"));
+  for (let i = 1; i <= 10; i++) {
+    await bot.handleUpdate(makeUpdate(i, 111, `message ${i}`));
+  }
+  await bot.handleUpdate(makeUpdate(11, 111, "message 11"));
+  await bot.handleUpdate(makeUpdate(12, 111, "message 12"));
+  await bot.handleUpdate(makeUpdate(13, 111, "message 13"));
+  assert.equal(api.sent.length, 11);
+  assert.equal(readTelegramInbox(root).length, 10);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.filter((e) => e.event === "telegram_chat_rate_limited").length, 1);
+  fakeNow += 11 * 60 * 1000;
+  await bot.handleUpdate(makeUpdate(14, 111, "after the wait"));
+  assert.equal(readTelegramInbox(root).length, 11);
+  assert.equal(api.sent.length, 12);
+  assert.equal(api.sent[11].text, TELEGRAM_CHAT_ACK);
+  ok("chat rate limit stays silent after the first slow-down reply");
+}
+
+// 56. Outbox lines are sent exactly once and marked sent.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "outbox-once"));
+  appendTelegramOutbox(root, {
+    replyId: "r1",
+    inReplyTo: 5,
+    telegramUserId: 111,
+    text: "Hello from Muse.",
+    createdAt: new Date(fakeNow).toISOString(),
+    status: "pending",
+    attempts: 0,
+    sentAt: null,
+  });
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 1);
+  assert.equal(api.sent[0].text, "Hello from Muse.");
+  assert.equal(api.sent[0].chatId, 111);
+  let outbox = readTelegramOutbox(root);
+  assert.equal(outbox[0].status, "sent");
+  assert.ok(typeof outbox[0].sentAt === "string");
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 1);
+  ok("outbox lines are sent exactly once and marked sent");
+}
+
+// 57. Long outbox text is split into numbered parts, each under the limit.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "outbox-split"));
+  const long = "x".repeat(9000);
+  appendTelegramOutbox(root, {
+    replyId: "r1",
+    inReplyTo: 5,
+    telegramUserId: 111,
+    text: long,
+    createdAt: new Date(fakeNow).toISOString(),
+    status: "pending",
+    attempts: 0,
+    sentAt: null,
+  });
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 3);
+  assert.ok(api.sent[0].text.startsWith("[1/3] "));
+  assert.ok(api.sent[1].text.startsWith("[2/3] "));
+  assert.ok(api.sent[2].text.startsWith("[3/3] "));
+  for (const sent of api.sent) {
+    assert.ok(sent.text.length <= 4000);
+  }
+  assert.equal(api.sent.map((s) => s.text).join("").replace(/\[\d\/3\] /g, "").length, 9000);
+  assert.equal(readTelegramOutbox(root)[0].status, "sent");
+  ok("long outbox text is split into numbered parts");
+}
+
+// 58. Outbox delivery failure leaves the line pending and retries next
+// cycle.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "outbox-retry"));
+  let fails = 1;
+  const realSend = api.sendMessage.bind(api);
+  api.sendMessage = async (chatId, text) => {
+    if (fails > 0) {
+      fails -= 1;
+      throw new Error("network down");
+    }
+    return realSend(chatId, text);
+  };
+  appendTelegramOutbox(root, {
+    replyId: "r1",
+    inReplyTo: 5,
+    telegramUserId: 111,
+    text: "Retry me.",
+    createdAt: new Date(fakeNow).toISOString(),
+    status: "pending",
+    attempts: 0,
+    sentAt: null,
+  });
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 0);
+  let outbox = readTelegramOutbox(root);
+  assert.equal(outbox[0].status, "pending");
+  assert.equal(outbox[0].attempts, 1);
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 1);
+  assert.equal(api.sent[0].text, "Retry me.");
+  assert.equal(readTelegramOutbox(root)[0].status, "sent");
+  ok("outbox delivery failure leaves the line pending and retries next cycle");
+}
+
+// 59. Thread file keeps the last 20 messages.
+{
+  const root = path.join(tmp, "thread-cap");
+  fs.mkdirSync(root, { recursive: true });
+  allowTelegramUser(root, 111, "Owner");
+  for (let i = 1; i <= 25; i++) {
+    appendTelegramThreadMessage(root, 111, "user", `chat message ${i}`);
+  }
+  const thread = loadTelegramThread(root, 111);
+  assert.equal(thread.messages.length, 20);
+  assert.equal(thread.messages[0].text, "chat message 6");
+  assert.equal(thread.messages[19].text, "chat message 25");
+  assert.equal(thread.messages[0].role, "user");
+  assert.equal(thread.userId, 111);
+  ok("thread file keeps the last 20 messages");
+}
+
+// 60. Thread file skips secret-like text, but the message is still
+// queued so the relay can warn the user to revoke it.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "thread-secret"));
+  const secret = "123456789:AAE_fake_bot_token_abcdefghijklmnopqrstuvwxyz0123";
+  assert.equal(containsSecretLikeText(`my token is ${secret}`), true);
+  assert.equal(containsSecretLikeText("just a normal message"), false);
+  await bot.handleUpdate(makeUpdate(1, 111, `my token is ${secret}`));
+  assert.equal(api.sent.length, 1);
+  assert.equal(readTelegramInbox(root).length, 1);
+  assert.equal(readTelegramInbox(root)[0].text, `my token is ${secret}`);
+  const thread = loadTelegramThread(root, 111);
+  assert.ok(thread === null || thread.messages.length === 0);
+  ok("thread file skips secret-like text but the message is still queued");
+}
+
+// 61. Relay-status counts are right and never print message text.
+{
+  const scratch = path.join(tmp, "relay-cli");
+  copyRealDist(scratch);
+  const env = { ...process.env };
+  delete env.TELEGRAM_BOT_TOKEN;
+  execFileSync("node", ["dist/index.js", "setup", "--id", "demo-tenant", "--name", "Demo Tenant"], { cwd: scratch, encoding: "utf-8", env });
+  appendTelegramInbox(scratch, { messageId: 1, telegramUserId: 111, text: "MARKER-INBOX-TEXT-12345", receivedAt: new Date().toISOString(), status: "new", attempts: 0 });
+  appendTelegramInbox(scratch, { messageId: 2, telegramUserId: 111, text: "done one", receivedAt: new Date().toISOString(), status: "done", attempts: 0 });
+  appendTelegramOutbox(scratch, { replyId: "r1", inReplyTo: 1, telegramUserId: 111, text: "MARKER-OUTBOX-TEXT-67890", createdAt: new Date().toISOString(), status: "pending", attempts: 0, sentAt: null });
+  const statusOut = execFileSync("node", ["dist/index.js", "telegram-relay-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(statusOut.includes("Inbox pending: 1"));
+  assert.ok(statusOut.includes("Outbox pending: 1"));
+  assert.ok(statusOut.includes("Last relay run: never"));
+  assert.ok(!statusOut.includes("MARKER-INBOX-TEXT-12345"));
+  assert.ok(!statusOut.includes("MARKER-OUTBOX-TEXT-67890"));
+  assert.equal(telegramInboxPendingCount(scratch), 1);
+  assert.equal(telegramOutboxPendingCount(scratch), 1);
+  fs.writeFileSync(
+    path.join(scratch, "state", "telegram-relay-status.json"),
+    JSON.stringify({ lastRunAt: "2026-11-14T00:00:00.000Z", processed: 2, failed: 0, inboxPending: 1, outboxPending: 1, lastError: null }),
+  );
+  const statusOut2 = execFileSync("node", ["dist/index.js", "telegram-relay-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(statusOut2.includes("Last relay run: 2026-11-14T00:00:00.000Z"));
+  assert.ok(statusOut2.includes("processed 2"));
+  const relay = readTelegramRelayStatus(scratch);
+  assert.equal(relay.lastRunAt, "2026-11-14T00:00:00.000Z");
+  assert.equal(relay.processed, 2);
+  ok("relay-status counts are right and never print message text");
+}
+
+// 62. telegram-inbox and telegram-outbox show the full text only with
+// --show-text.
+{
+  const scratch = path.join(tmp, "relay-cli-text");
+  copyRealDist(scratch);
+  const env = { ...process.env };
+  delete env.TELEGRAM_BOT_TOKEN;
+  execFileSync("node", ["dist/index.js", "setup", "--id", "demo-tenant", "--name", "Demo Tenant"], { cwd: scratch, encoding: "utf-8", env });
+  appendTelegramInbox(scratch, { messageId: 9, telegramUserId: 111, text: "MARKER-INBOX-TEXT-12345", receivedAt: new Date().toISOString(), status: "new", attempts: 0 });
+  appendTelegramOutbox(scratch, { replyId: "r9", inReplyTo: 9, telegramUserId: 111, text: "MARKER-OUTBOX-TEXT-67890", createdAt: new Date().toISOString(), status: "pending", attempts: 0, sentAt: null });
+  const inboxOut = execFileSync("node", ["dist/index.js", "telegram-inbox"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(inboxOut.includes("1 pending"));
+  assert.ok(inboxOut.includes("user 111"));
+  assert.ok(!inboxOut.includes("MARKER-INBOX-TEXT-12345"));
+  const inboxText = execFileSync("node", ["dist/index.js", "telegram-inbox", "--show-text"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(inboxText.includes("MARKER-INBOX-TEXT-12345"));
+  const outboxOut = execFileSync("node", ["dist/index.js", "telegram-outbox"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(outboxOut.includes("1 pending"));
+  assert.ok(!outboxOut.includes("MARKER-OUTBOX-TEXT-67890"));
+  const outboxText = execFileSync("node", ["dist/index.js", "telegram-outbox", "--show-text"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(outboxText.includes("MARKER-OUTBOX-TEXT-67890"));
+  ok("telegram-inbox and telegram-outbox show the full text only with --show-text");
+}
+
+// 63. Inbox, outbox, thread, relay status, and lock files are gitignored.
+{
+  const out = execFileSync(
+    "git",
+    ["check-ignore", "state/telegram-inbox.jsonl", "state/telegram-outbox.jsonl", "state/telegram-threads/111.json", "state/telegram-relay-status.json", "state/telegram-relay.lock"],
+    { cwd: rootDir, encoding: "utf-8" },
+  );
+  assert.ok(out.includes("telegram-inbox.jsonl"));
+  assert.ok(out.includes("telegram-outbox.jsonl"));
+  assert.ok(out.includes("telegram-threads"));
+  assert.ok(out.includes("telegram-relay-status.json"));
+  assert.ok(out.includes("telegram-relay.lock"));
+  ok("inbox, outbox, thread, relay status, and lock files are gitignored");
+}
+
+// 64. Chat and command rate limits are separate: chats do not eat the
+// command budget, and commands do not eat the chat budget.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "chat-command-limits"));
+  for (let i = 1; i <= 10; i++) {
+    await bot.handleUpdate(makeUpdate(i, 111, `chat ${i}`));
+  }
+  await bot.handleUpdate(makeUpdate(11, 111, "/status"));
+  assert.equal(api.sent.length, 11);
+  assert.ok(api.sent[10].text.includes("TrustyMUSE Harness"));
+  for (let i = 12; i <= 30; i++) {
+    await bot.handleUpdate(makeUpdate(i, 111, "/status"));
+  }
+  assert.equal(api.sent.length, 30);
+  await bot.handleUpdate(makeUpdate(31, 111, "/status"));
+  assert.ok(api.sent[30].text.includes("Slow down"));
+  fakeNow += 11 * 60 * 1000;
+  await bot.handleUpdate(makeUpdate(32, 111, "chat after the window"));
+  assert.equal(api.sent.length, 32);
+  assert.equal(api.sent[31].text, TELEGRAM_CHAT_ACK);
+  assert.equal(readTelegramInbox(root).length, 11);
+  ok("chat and command rate limits are separate");
+}
+
+// 65. Outbox lines are delivered oldest first.
+{
+  const { root, api, bot } = makeChatBot(path.join(tmp, "outbox-order"));
+  for (const [replyId, text] of [["r1", "first"], ["r2", "second"], ["r3", "third"]]) {
+    appendTelegramOutbox(root, {
+      replyId,
+      inReplyTo: 5,
+      telegramUserId: 111,
+      text,
+      createdAt: new Date(fakeNow).toISOString(),
+      status: "pending",
+      attempts: 0,
+      sentAt: null,
+    });
+  }
+  await bot.pollOnce();
+  assert.deepEqual(api.sent.map((s) => s.text), ["first", "second", "third"]);
+  assert.deepEqual(readTelegramOutbox(root).map((e) => e.status), ["sent", "sent", "sent"]);
+  ok("outbox lines are delivered oldest first");
 }
 
 console.log(`All ${passed} telegram test groups passed. Temp dir: ${tmp}`);

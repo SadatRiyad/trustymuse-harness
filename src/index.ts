@@ -69,11 +69,22 @@ import {
   getTelegramBotStatus,
   getTelegramTokenSource,
   loadAllowlist,
+  readTelegramInbox,
+  readTelegramOutbox,
+  readTelegramRelayStatus,
   requireTelegramToken,
+  telegramInboxPendingCount,
+  telegramOutboxPendingCount,
   TelegramHttpApi,
 } from "./telegram/bot";
 
-// TrustyMUSE Harness V2.1 CLI. Local only, multi-tenant.
+// TrustyMUSE Harness V2.2 CLI. Local only, multi-tenant.
+// V2.2 makes Telegram a Muse channel: plain text that is not a
+// command is queued in the inbox for a scheduled relay job run by
+// Muse, which answers it and writes the reply to the outbox for the
+// bot to deliver (see docs/V2-2-TELEGRAM-MUSE-CHANNEL.md and
+// scripts/telegram-relay.md). The relay job itself is a scheduled job,
+// not a CLI command, and the relay cron is created after this build.
 // V2.1 starts the Telegram bot from the dashboard, not the terminal:
 // telegram-start is supervisor-managed, the bot writes a heartbeat on
 // every poll, and the poll loop never overlaps getUpdates (see
@@ -154,7 +165,7 @@ function getArg(args: string[], name: string, fallback: string): string {
 }
 
 function printHelp(): void {
-  console.log("TrustyMUSE Harness V2.0");
+  console.log("TrustyMUSE Harness V2.2");
   console.log("Usage:");
   console.log("  node dist/index.js status [--tenant <id>]");
   console.log("  node dist/index.js packet --model chatgpt --type seo --title \"Title\" --task \"Task text\" [--project my-project] [--tenant <id>]");
@@ -198,11 +209,14 @@ function printHelp(): void {
   console.log("  node dist/index.js telegram-start [--tenant <id>]");
   console.log("  node dist/index.js telegram-stop");
   console.log("  node dist/index.js telegram-status");
+  console.log("  node dist/index.js telegram-relay-status");
+  console.log("  node dist/index.js telegram-inbox [--show-text]");
+  console.log("  node dist/index.js telegram-outbox [--show-text]");
   console.log("");
   console.log("Modes: subscription is on by default. API is off by default and blocked when budget cap is 0.");
   console.log("Models: 9 subscription models (chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral). Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude; the rest are packet-only.");
   console.log("Analytics: Phase 1 is a dry-run preview only. analytics-preview prints the exact payload that would be sent and sends nothing. The central service is not built yet, so analytics-enable is refused until Phase 2.");
-  console.log("Telegram: full control from Telegram with telegram-start. The token comes from TELEGRAM_BOT_TOKEN first, then from the file token in state/telegram.json, which the TrustyHarness panel box writes. telegram-start is supervisor-managed: it starts the bot in the background through scripts/telegram-bot-supervisor.sh, adopts a bot that is already running instead of starting a duplicate, and the panel Start button uses the same supervisor. telegram-stop stops it, telegram-status reports running or stopped with the heartbeat last poll time. Only allowlisted user ids get a reply. /run runs one browser job on a connected account, /do takes plain words. Nothing here ever deploys. See docs/V2-1-BOT-START-FROM-PANEL.md.");
+  console.log("Telegram: full control from Telegram with telegram-start. The token comes from TELEGRAM_BOT_TOKEN first, then from the file token in state/telegram.json, which the TrustyHarness panel box writes. telegram-start is supervisor-managed: it starts the bot in the background through scripts/telegram-bot-supervisor.sh, adopts a bot that is already running instead of starting a duplicate, and the panel Start button uses the same supervisor. telegram-stop stops it, telegram-status reports running or stopped with the heartbeat last poll time. Only allowlisted user ids get a reply. /run runs one browser job on a connected account, /do takes plain words. Plain text that is not a command is chat: the bot queues it in the inbox and sends one fixed acknowledgement, and a scheduled relay job run by Muse answers it within a few minutes. Check the relay with telegram-relay-status, telegram-inbox, and telegram-outbox. Nothing here ever deploys. See docs/V2-2-TELEGRAM-MUSE-CHANNEL.md.");
   console.log("Browser mode is off by default. Read docs/V1-1-BROWSER-MODE.md before you turn it on.");
   console.log("Projects: connect any running or new project with project-add. Jobs scoped with --project are draft only.");
   console.log("Tenants: one tenant is one Muse account. Tenant is resolved from --tenant, then TRUSTYMUSE_TENANT, then tenants.default in config.yaml, then \"default\".");
@@ -557,6 +571,63 @@ async function main(): Promise<void> {
       lines.push("Note: no heartbeat file yet. The bot started before V2.1 or has not polled yet. Restart it with telegram-stop and telegram-start to enable the heartbeat.");
     }
     console.log(lines.join("\n"));
+    return;
+  }
+
+  // Chat mode relay status, V2.2. Install-wide, like the other
+  // telegram registry commands. Prints only counts and times, never
+  // any message text: the inbox and outbox hold the user's words, and
+  // a status command must not leak them into a terminal log.
+  if (command === "telegram-relay-status") {
+    const relay = readTelegramRelayStatus(rootDir);
+    const lines = [
+      "Telegram relay: chat mode. Plain text from an allowlisted user is queued in the inbox, and a scheduled relay job run by Muse answers it.",
+      `Inbox pending: ${telegramInboxPendingCount(rootDir)}`,
+      `Outbox pending: ${telegramOutboxPendingCount(rootDir)}`,
+    ];
+    if (relay && relay.lastRunAt) {
+      lines.push(`Last relay run: ${relay.lastRunAt} (processed ${relay.processed}, failed ${relay.failed})`);
+    } else {
+      lines.push("Last relay run: never. The relay cron job is created after this build; replies take about 2 to 4 minutes once it runs.");
+    }
+    if (relay && relay.lastError) {
+      lines.push(`Last relay error: ${relay.lastError}`);
+    }
+    console.log(lines.join("\n"));
+    return;
+  }
+
+  // telegram-inbox and telegram-outbox list pending queue lines with
+  // id, user id, and time only. The full text is shown only with
+  // --show-text, so a routine status check never prints the user's
+  // words into a terminal log.
+  if (command === "telegram-inbox" || command === "telegram-outbox") {
+    const showText = args.includes("--show-text");
+    if (command === "telegram-inbox") {
+      const pending = readTelegramInbox(rootDir).filter((entry) => entry.status === "new" || entry.status === "processing");
+      console.log(`Telegram inbox: ${pending.length} pending message(s).`);
+      for (const entry of pending) {
+        console.log(`  ${entry.messageId} user ${entry.telegramUserId} ${entry.receivedAt} [${entry.status}]`);
+        if (showText) {
+          console.log(`    ${entry.text.split("\n").join("\n    ")}`);
+        }
+      }
+      if (pending.length === 0) {
+        console.log("Nothing is waiting for the relay.");
+      }
+    } else {
+      const pending = readTelegramOutbox(rootDir).filter((entry) => entry.status === "pending");
+      console.log(`Telegram outbox: ${pending.length} pending reply(ies).`);
+      for (const entry of pending) {
+        console.log(`  ${entry.replyId} in reply to ${entry.inReplyTo} user ${entry.telegramUserId} ${entry.createdAt}`);
+        if (showText) {
+          console.log(`    ${entry.text.split("\n").join("\n    ")}`);
+        }
+      }
+      if (pending.length === 0) {
+        console.log("Nothing is waiting to be delivered.");
+      }
+    }
     return;
   }
 
@@ -1380,7 +1451,7 @@ async function main(): Promise<void> {
     }
     const api = new TelegramHttpApi(token);
     const bot = createTelegramBot({ rootDir, ctx, config, api });
-    console.log("TrustyMUSE Harness V2.1 Telegram bot starting...");
+    console.log("TrustyMUSE Harness V2.2 Telegram bot starting...");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId}). Only allowlisted Telegram users get a reply.`);
     console.log("Link a user first with: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
     console.log("Stop the bot with telegram-stop. HOLD blocks every write from Telegram. /run runs one browser job on a connected account. Nothing here ever deploys.");

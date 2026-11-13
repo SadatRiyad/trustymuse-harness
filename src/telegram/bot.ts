@@ -1,15 +1,18 @@
-// Telegram Bot control, V2.0. The harness is controlled from Telegram
-// through a bot the user creates with @BotFather. The bot answers
-// read-only commands for any allowlisted user, and runs the write
-// commands the harness itself offers: project add, remove, and pause,
-// model connect and disconnect, draft task and packet creation, HOLD on
-// and off, and one browser job at a time on a connected account with
-// /run. /do parses a plain-language instruction into a packet, a
-// project-scoped task, or a plan-then-audit pipeline. The bot never
-// deploys, publishes, merges, or sends anything: /do with deploy words
-// stops at the audit and reports the verdict, and the deploy itself
-// needs the user's approval in the Muse app. See
-// docs/V2-0-TELEGRAM-FULL-CONTROL.md.
+// Telegram Bot control, V2.2. The harness is controlled from Telegram
+// through a bot the user creates with @BotFather, and Telegram is also
+// a Muse channel: plain text that is not a command is a chat message,
+// queued in the inbox for a scheduled relay job run by Muse, which
+// answers it and writes the reply to the outbox for the bot to deliver.
+// The bot answers read-only commands for any allowlisted user, and runs
+// the write commands the harness itself offers: project add, remove,
+// and pause, model connect and disconnect, draft task and packet
+// creation, HOLD on and off, and one browser job at a time on a
+// connected account with /run. /do parses a plain-language instruction
+// into a packet, a project-scoped task, or a plan-then-audit pipeline.
+// The bot never deploys, publishes, merges, or sends anything: /do
+// with deploy words stops at the audit and reports the verdict, and
+// the deploy itself needs the user's approval in the Muse app. See
+// docs/V2-2-TELEGRAM-MUSE-CHANNEL.md.
 //
 // Safety rules, in order:
 // - The bot token comes from TELEGRAM_BOT_TOKEN first, then from the
@@ -97,6 +100,25 @@ export const TELEGRAM_POLL_RETRY_MS = 5000;
 // A 409 means another getUpdates request is still open on Telegram's
 // side. Back off longer instead of hammering the same short retry.
 export const TELEGRAM_POLL_CONFLICT_BACKOFF_MS = 15000;
+
+// Chat mode, V2.2. Plain text is a chat message, not a command. The
+// bot queues it in the inbox and sends one fixed acknowledgement at
+// once. The relay answers later, so replies take about 2 to 4 minutes.
+// The chat rate limit is separate from the command rate limit: at most
+// 10 chat messages per user per 10 minutes. The 11th gets one polite
+// slow-down reply, and further messages in the window are dropped
+// silently until the window passes.
+export const TELEGRAM_CHAT_ACK = "Got it. Muse will reply here.";
+export const TELEGRAM_CHAT_SLOWDOWN =
+  "You are sending messages faster than I can answer them. I will catch up, please wait a little.";
+export const TELEGRAM_CHAT_MAX_PER_WINDOW = 10;
+export const TELEGRAM_CHAT_WINDOW_MS = 10 * 60 * 1000;
+// The thread file keeps the last 20 messages per user. Older entries
+// are folded into the summary by the relay and dropped.
+export const TELEGRAM_THREAD_MAX_MESSAGES = 20;
+// An outbox line that fails to send is retried on the next poll cycle.
+// After three failed attempts it is marked failed and never retried.
+export const TELEGRAM_OUTBOX_MAX_ATTEMPTS = 3;
 
 // The token comes from TELEGRAM_BOT_TOKEN first, then from the file
 // token in gitignored state/telegram.json, so the TrustyHarness panel
@@ -645,6 +667,283 @@ export function getTelegramBotStatus(rootDir: string): TelegramBotStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Chat mode, V2.2. Telegram as a Muse channel. Plain text that is not a
+// command is a chat message: the bot queues it in the inbox, sends one
+// fixed acknowledgement at once, and a scheduled relay job run by Muse
+// answers it later. The bot never answers chat itself. The relay writes
+// its replies to the outbox, and the bot delivers them on its poll
+// cycle. All three files are gitignored, install-wide, and never hold
+// a credential. See docs/V2-2-TELEGRAM-MUSE-CHANNEL.md and
+// scripts/telegram-relay.md.
+// ---------------------------------------------------------------------------
+
+export type TelegramQueueStatus = "new" | "processing" | "done" | "failed";
+export type TelegramOutboxStatus = "pending" | "sent" | "failed";
+
+export interface TelegramInboxEntry {
+  messageId: number;
+  telegramUserId: number;
+  text: string;
+  receivedAt: string;
+  status: TelegramQueueStatus;
+  attempts: number;
+}
+
+export interface TelegramOutboxEntry {
+  replyId: string;
+  inReplyTo: number;
+  telegramUserId: number;
+  text: string;
+  createdAt: string;
+  status: TelegramOutboxStatus;
+  attempts: number;
+  sentAt: string | null;
+}
+
+export interface TelegramThreadMessage {
+  role: "user" | "muse";
+  text: string;
+  at: string;
+}
+
+export interface TelegramThread {
+  userId: number;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: string;
+  messages: TelegramThreadMessage[];
+}
+
+export interface TelegramRelayStatus {
+  lastRunAt: string | null;
+  processed: number;
+  failed: number;
+  inboxPending: number;
+  outboxPending: number;
+  lastError: string | null;
+}
+
+export function telegramInboxPath(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-inbox.jsonl");
+}
+
+export function telegramOutboxPath(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-outbox.jsonl");
+}
+
+export function telegramThreadsDir(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-threads");
+}
+
+export function telegramThreadPath(rootDir: string, userId: number): string {
+  return path.join(telegramThreadsDir(rootDir), `${userId}.json`);
+}
+
+export function telegramRelayStatusPath(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-relay-status.json");
+}
+
+function readJsonLines<T>(file: string): T[] {
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  const out: T[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      out.push(JSON.parse(trimmed) as T);
+    } catch {
+      // A corrupt line is skipped, never fatal: one bad line must not
+      // stop the bot from polling or delivering the rest.
+      console.log(`Telegram bot: skipped a corrupt line in ${path.basename(file)}.`);
+    }
+  }
+  return out;
+}
+
+function writeJsonLines<T>(file: string, entries: T[]): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body = entries.map((entry) => JSON.stringify(entry)).join("\n");
+  fs.writeFileSync(file, body.length > 0 ? body + "\n" : "", "utf-8");
+}
+
+function appendJsonLine<T>(file: string, entry: T): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(entry) + "\n", "utf-8");
+}
+
+export function readTelegramInbox(rootDir: string): TelegramInboxEntry[] {
+  return readJsonLines<TelegramInboxEntry>(telegramInboxPath(rootDir));
+}
+
+export function appendTelegramInbox(rootDir: string, entry: TelegramInboxEntry): void {
+  appendJsonLine(telegramInboxPath(rootDir), entry);
+}
+
+export function readTelegramOutbox(rootDir: string): TelegramOutboxEntry[] {
+  return readJsonLines<TelegramOutboxEntry>(telegramOutboxPath(rootDir));
+}
+
+export function appendTelegramOutbox(rootDir: string, entry: TelegramOutboxEntry): void {
+  appendJsonLine(telegramOutboxPath(rootDir), entry);
+}
+
+// Mark one outbox line by its reply id. The write is a full rewrite of
+// the file, so a crash between sending and marking is the only window
+// for a duplicate, and the next delivery then sends it once more.
+export function markTelegramOutbox(
+  rootDir: string,
+  replyId: string,
+  status: TelegramOutboxStatus,
+  sentAt: string | null,
+  attempts: number,
+): boolean {
+  const entries = readTelegramOutbox(rootDir);
+  let changed = false;
+  for (const entry of entries) {
+    if (entry.replyId === replyId) {
+      entry.status = status;
+      entry.sentAt = sentAt;
+      entry.attempts = attempts;
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeJsonLines(telegramOutboxPath(rootDir), entries);
+  }
+  return changed;
+}
+
+// A token-shaped string must never be stored in a thread file. The scan
+// covers a Telegram bot token, an OpenAI-style key, and a GitHub
+// personal token. A match does not block the chat message itself: the
+// inbox still holds it so the relay can warn the user to revoke it,
+// but the thread file never holds it.
+export function containsSecretLikeText(text: string): boolean {
+  return (
+    /\b\d{8,10}:[A-Za-z0-9_-]{30,}\b/.test(text) ||
+    /\bsk-[A-Za-z0-9]{20,}\b/.test(text) ||
+    /\bghp_[A-Za-z0-9]{20,}\b/.test(text)
+  );
+}
+
+export function loadTelegramThread(rootDir: string, userId: number): TelegramThread | null {
+  const file = telegramThreadPath(rootDir, userId);
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.userId !== "number" || !Array.isArray(record.messages)) {
+    return null;
+  }
+  const messages: TelegramThreadMessage[] = [];
+  for (const item of record.messages as unknown[]) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const m = item as Record<string, unknown>;
+    if ((m.role === "user" || m.role === "muse") && typeof m.text === "string" && typeof m.at === "string") {
+      messages.push({ role: m.role, text: m.text, at: m.at });
+    }
+  }
+  return {
+    userId: record.userId,
+    label: typeof record.label === "string" ? record.label : null,
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
+    summary: typeof record.summary === "string" ? record.summary : "",
+    messages,
+  };
+}
+
+export function saveTelegramThread(rootDir: string, thread: TelegramThread): void {
+  fs.mkdirSync(telegramThreadsDir(rootDir), { recursive: true });
+  fs.writeFileSync(telegramThreadPath(rootDir, thread.userId), JSON.stringify(thread, null, 2) + "\n", "utf-8");
+}
+
+// Append one message to a user's thread, keeping the last 20. The bot
+// appends the user's own messages; the relay appends Muse replies with
+// the same shape. The summary is the relay's own words and is never
+// rewritten here: when the list passes 20 the oldest entries are
+// dropped and the summary is left as the relay wrote it.
+export function appendTelegramThreadMessage(
+  rootDir: string,
+  userId: number,
+  role: "user" | "muse",
+  text: string,
+  nowIso?: string,
+): TelegramThread {
+  const at = nowIso || new Date().toISOString();
+  const existing = loadTelegramThread(rootDir, userId);
+  const thread: TelegramThread = existing || {
+    userId,
+    label: getTelegramAllowLabel(rootDir, userId),
+    createdAt: at,
+    updatedAt: at,
+    summary: "",
+    messages: [],
+  };
+  thread.messages.push({ role, text, at });
+  if (thread.messages.length > TELEGRAM_THREAD_MAX_MESSAGES) {
+    thread.messages = thread.messages.slice(thread.messages.length - TELEGRAM_THREAD_MAX_MESSAGES);
+  }
+  thread.updatedAt = at;
+  saveTelegramThread(rootDir, thread);
+  return thread;
+}
+
+// The relay job writes this file after each run, so
+// telegram-relay-status can report when the relay last ran. A missing
+// or corrupt file means the relay has never run, never an error.
+export function readTelegramRelayStatus(rootDir: string): TelegramRelayStatus | null {
+  const file = telegramRelayStatusPath(rootDir);
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    lastRunAt: typeof record.lastRunAt === "string" ? record.lastRunAt : null,
+    processed: typeof record.processed === "number" ? record.processed : 0,
+    failed: typeof record.failed === "number" ? record.failed : 0,
+    inboxPending: typeof record.inboxPending === "number" ? record.inboxPending : 0,
+    outboxPending: typeof record.outboxPending === "number" ? record.outboxPending : 0,
+    lastError: typeof record.lastError === "string" ? record.lastError : null,
+  };
+}
+
+// Messages waiting for the relay to answer them. "processing" lines
+// are being worked on, so only "new" lines count as pending.
+export function telegramInboxPendingCount(rootDir: string): number {
+  return readTelegramInbox(rootDir).filter((entry) => entry.status === "new").length;
+}
+
+export function telegramOutboxPendingCount(rootDir: string): number {
+  return readTelegramOutbox(rootDir).filter((entry) => entry.status === "pending").length;
+}
+
+// ---------------------------------------------------------------------------
 // Message helpers. Telegram caps a message at 4096 characters, so every
 // reply is capped at 4000 with a note. User input is never echoed back
 // into an audit detail except as a single sanitized token, so a crafted
@@ -656,6 +955,22 @@ export function truncateForTelegram(text: string): string {
     return text;
   }
   return text.slice(0, TELEGRAM_MAX_MESSAGE_CHARS) + "\n[Reply cut short: it was over the Telegram message limit.]";
+}
+
+// Split a long reply into numbered parts, each under the Telegram
+// limit. Splitting is code-point safe, so an emoji is never cut in
+// half. A single part is sent as-is, with no part number.
+export function splitTelegramMessage(text: string): string[] {
+  const points = Array.from(text);
+  if (points.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
+    return [text];
+  }
+  const bodySize = 3900;
+  const bodies: string[] = [];
+  for (let i = 0; i < points.length; i += bodySize) {
+    bodies.push(points.slice(i, i + bodySize).join(""));
+  }
+  return bodies.map((body, index) => `[${index + 1}/${bodies.length}] ${body}`);
 }
 
 export function oneLine(value: string, maxLength: number): string {
@@ -730,6 +1045,7 @@ function readHarnessVersion(rootDir: string): string {
 
 const HELP_TEXT = [
   "TrustyMUSE Harness commands:",
+  "Just talk to use Muse here. Plain text goes to Muse, and Muse replies here within a few minutes. Commands below run at once, with no wait.",
   "/status - harness version, tenant, HOLD, budget, models, browser accounts",
   "/models - subscription models and which are connected",
   "/projects - connected projects",
@@ -888,6 +1204,12 @@ export class TelegramBot {
   private sleep: (ms: number) => Promise<void>;
   private commandTimes = new Map<number, number[]>();
   private unauthorizedLoggedAt = new Map<number, number>();
+  // Chat rate limit, V2.2, separate from the command limit: at most
+  // 10 chat messages per user per 10 minutes. The slow-down reply is
+  // sent once per window; further messages in the window are dropped
+  // silently. Both maps live in memory only and reset on restart.
+  private chatTimes = new Map<number, number[]>();
+  private chatSlowdownSentAt = new Map<number, number>();
   private driverFactory: (account: BrowserAccount) => BrowserDriver;
   private workspaceRoot?: string;
   private queue: BrowserQueue;
@@ -944,6 +1266,14 @@ export class TelegramBot {
         } catch (error) {
           console.log(`Telegram bot: one update failed and was skipped. ${String(error).replace(/^Error: /, "")}`);
         }
+      }
+      // Outbox delivery runs on every poll cycle, even when there were
+      // no updates, so relay replies reach the user without waiting
+      // for the next message. A delivery failure never breaks polling.
+      try {
+        await this.deliverOutbox();
+      } catch (error) {
+        console.log(`Telegram bot: outbox delivery failed this cycle. ${String(error).replace(/^Error: /, "")}`);
       }
       this.writeHeartbeat(true, null);
     } catch (error) {
@@ -1085,13 +1415,18 @@ export class TelegramBot {
       this.logUnauthorized(userId);
       return;
     }
-    if (!this.checkRateLimit(userId)) {
-      await this.api.sendMessage(
-        chatId,
-        truncateForTelegram("Slow down: you sent too many commands in one minute. Wait a minute and try again."),
-      );
-      this.auditEvent({ reply: "", event: "telegram_rate_limited", result: "blocked" }, userId);
-      return;
+    // Commands keep the 20-per-minute command limit. Chat messages
+    // have their own limit, checked inside dispatch, so talking does
+    // not eat the command budget and commands do not eat the chat one.
+    if (text.startsWith("/")) {
+      if (!this.checkRateLimit(userId)) {
+        await this.api.sendMessage(
+          chatId,
+          truncateForTelegram("Slow down: you sent too many commands in one minute. Wait a minute and try again."),
+        );
+        this.auditEvent({ reply: "", event: "telegram_rate_limited", result: "blocked" }, userId);
+        return;
+      }
     }
     // A pending HOLD-off confirmation is answered by the next message
     // only. YES turns HOLD off. Anything else cancels the confirmation
@@ -1109,19 +1444,113 @@ export class TelegramBot {
       }
       console.log(`Telegram bot: HOLD-off confirmation cancelled for user ${userId}.`);
     }
-    const outcome = await this.dispatch(userId, text);
+    const outcome = await this.dispatch(userId, text, { chatId, updateId: update.update_id });
+    if (!outcome) {
+      // Silent drop: a chat message over the rate limit after the one
+      // slow-down reply in this window. No reply, no audit event.
+      return;
+    }
     if (outcome.reply) {
       await this.api.sendMessage(chatId, truncateForTelegram(outcome.reply));
     }
     this.auditEvent(outcome, userId);
   }
 
-  private async dispatch(userId: number, text: string): Promise<CommandOutcome> {
+  // Chat rate limit, V2.2. Returns "ok" when the message may be
+  // queued, "slowdown" when this is the first message over the limit
+  // in the window and the user gets one polite slow-down reply, and
+  // "silent" for every further message in the window.
+  private checkChatRateLimit(userId: number): "ok" | "slowdown" | "silent" {
+    const now = this.now();
+    const windowStart = now - TELEGRAM_CHAT_WINDOW_MS;
+    const times = (this.chatTimes.get(userId) || []).filter((t) => t > windowStart);
+    if (times.length >= TELEGRAM_CHAT_MAX_PER_WINDOW) {
+      const slowdownAt = this.chatSlowdownSentAt.get(userId) || 0;
+      if (now - slowdownAt > TELEGRAM_CHAT_WINDOW_MS) {
+        this.chatSlowdownSentAt.set(userId, now);
+        return "slowdown";
+      }
+      return "silent";
+    }
+    times.push(now);
+    this.chatTimes.set(userId, times);
+    return "ok";
+  }
+
+  // Chat mode, V2.2. Plain text from an allowlisted user is queued in
+  // the inbox for the relay and answered with one fixed acknowledgement
+  // at once. The bot never answers chat itself, and the acknowledgement
+  // is never mistaken for a Muse reply: it is a fixed string that says
+  // Muse will reply, not that Muse has replied.
+  private queueChat(userId: number, text: string, updateId: number): CommandOutcome | null {
+    const limit = this.checkChatRateLimit(userId);
+    if (limit === "slowdown") {
+      return { reply: TELEGRAM_CHAT_SLOWDOWN, event: "telegram_chat_rate_limited", result: "blocked" };
+    }
+    if (limit === "silent") {
+      return null;
+    }
+    const stored = text.length > TELEGRAM_MAX_MESSAGE_CHARS ? text.slice(0, TELEGRAM_MAX_MESSAGE_CHARS) : text;
+    appendTelegramInbox(this.rootDir, {
+      messageId: updateId,
+      telegramUserId: userId,
+      text: stored,
+      receivedAt: new Date(this.now()).toISOString(),
+      status: "new",
+      attempts: 0,
+    });
+    // The thread keeps the conversation, but never a secret. A
+    // token-shaped string is still queued, so the relay can warn the
+    // user to revoke it, but it is never written to the thread file.
+    if (!containsSecretLikeText(stored)) {
+      try {
+        appendTelegramThreadMessage(this.rootDir, userId, "user", stored, new Date(this.now()).toISOString());
+      } catch {
+        // A thread write failure must not lose the chat message: the
+        // inbox already holds it, and the relay answers from the inbox.
+        console.log(`Telegram bot: thread write failed for user ${userId}, the inbox still holds the message.`);
+      }
+    }
+    return { reply: TELEGRAM_CHAT_ACK, event: "telegram_chat_queued" };
+  }
+
+  // Outbox delivery, V2.2. Sends pending outbox lines, oldest first,
+  // and marks each one sent only after Telegram confirms the send. A
+  // line is sent at most once per cycle: after a successful send its
+  // status is "sent", so the next cycle skips it. A failed send leaves
+  // the line pending and stops this cycle, so order is kept and the
+  // next cycle retries. After three failed attempts the line is marked
+  // "failed" and never retried.
+  private async deliverOutbox(): Promise<void> {
+    const entries = readTelegramOutbox(this.rootDir);
+    for (const entry of entries) {
+      if (entry.status !== "pending") {
+        continue;
+      }
+      const parts = splitTelegramMessage(entry.text);
+      try {
+        for (const part of parts) {
+          await this.api.sendMessage(entry.telegramUserId, part);
+        }
+        markTelegramOutbox(this.rootDir, entry.replyId, "sent", new Date(this.now()).toISOString(), entry.attempts);
+      } catch (error) {
+        const attempts = (entry.attempts || 0) + 1;
+        const failed = attempts >= TELEGRAM_OUTBOX_MAX_ATTEMPTS;
+        markTelegramOutbox(this.rootDir, entry.replyId, failed ? "failed" : "pending", null, attempts);
+        console.log(
+          `Telegram bot: outbox delivery failed for reply ${entry.replyId}, attempt ${attempts}. ${String(error).replace(/^Error: /, "")}`,
+        );
+        break;
+      }
+    }
+  }
+
+  private async dispatch(userId: number, text: string, context?: { chatId: number; updateId: number }): Promise<CommandOutcome | null> {
     if (!text.startsWith("/")) {
-      return {
-        reply: "I only answer commands. Send /help for the command list.",
-        event: "telegram_unknown_command",
-      };
+      if (!context) {
+        return null;
+      }
+      return this.queueChat(userId, text, context.updateId);
     }
     const tokens = tokenizeArgs(text);
     const first = tokens[0] || "";
@@ -1193,7 +1622,7 @@ export class TelegramBot {
     const lines = [
       "TrustyMUSE Harness, connected over Telegram.",
       label ? `You are allowlisted as ${label}.` : "You are allowlisted.",
-      "Read-only commands work now. /packet and /task create drafts only, never send. /run runs one browser job on a connected account. /do takes plain words and turns them into a packet or a plan-then-audit pipeline. HOLD blocks every write, and nothing here ever deploys.",
+      "Just talk to use Muse here. Plain text goes to Muse, and Muse replies here within a few minutes. Commands run at once, with no wait. /packet and /task create drafts only, never send. /run runs one browser job on a connected account. /do takes plain words and turns them into a packet or a plan-then-audit pipeline. HOLD blocks every write, and nothing here ever deploys.",
       "",
       HELP_TEXT,
     ];

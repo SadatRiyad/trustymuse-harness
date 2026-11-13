@@ -1,6 +1,16 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V2.1 local only, multi-tenant, public repo. Version 2.1.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, started by hand before V2.1.
+Date: 2026-11-14. Status: V2.2 local only, multi-tenant, public repo. Version 2.2.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.1 code with the panel Start button, and the owner is allowlisted.
+
+## What V2.2 adds: Telegram as a Muse Channel
+
+- Plain text that is not a command is a chat message. The bot queues it in `state/telegram-inbox.jsonl`, sends one fixed acknowledgement at once ("Got it. Muse will reply here."), and a scheduled relay job run by Muse answers it later. The relay writes its reply to `state/telegram-outbox.jsonl`, and the bot delivers it on its next poll cycle. Commands keep working exactly as in V2.0 and V2.1.
+- Thread file per user, `state/telegram-threads/<telegramUserId>.json`, keeps the last 20 messages. A token-shaped string is never written to the thread file, though the message is still queued so the relay can warn the user to revoke it.
+- Relay runner contract in `scripts/telegram-relay.md`: what the scheduled relay job reads, how it replies, its safety rules, and its limits (at most 5 new messages per run, at most 10 minutes per message step, at most 2 revisions in a multi-model fix loop, lock file so two runs never overlap). The relay is a scheduled Muse job, not a CLI command.
+- New CLI: `telegram-relay-status` (counts and last run time, never message text), `telegram-inbox [--show-text]` and `telegram-outbox [--show-text]` (full text only with the flag). Chat rate limit is 10 messages per user per 10 minutes, separate from the 20-per-minute command limit: the 11th gets one slow-down reply, further messages in the window are dropped silently.
+- Safety: exactly one audit event per chat message (`telegram_chat_queued`), with the numeric Telegram user id only, never the message text. HOLD blocks relay writes. The relay never deploys, pushes, merges, publishes, or sends anything; approval cards live in the Muse app.
+- New tests in `tests/run-telegram-tests.mjs`, 15 groups, temp dirs only, mock Telegram API only, never api.telegram.org, no real token. `npm test` now runs 167 groups.
+- Still not done: no relay cron job yet (the contract is written, the scheduled job is created after this build), no live chat reply yet, no panel change in this build, no webhook mode, no deploy from Telegram.
 
 ## What V2.1 adds: The Bot Starts From the Dashboard
 
@@ -8,7 +18,7 @@ Date: 2026-11-14. Status: V2.1 local only, multi-tenant, public repo. Version 2.
 - Heartbeat: the bot writes `state/telegram-heartbeat.json` on every poll (lastPollAt, running, pid, tenantId, tokenSource, allowlistCount, lastError), so the panel can show RUNNING or STOPPED honestly. Both new files are gitignored.
 - Poll loop fix for the live HTTP 409: the poll timeout is 25 seconds with a 30-second abort margin (was 30 seconds with a 10-second margin), `pollOnce` never starts a second `getUpdates` while one is in flight, and a 409 backs off for 15 seconds instead of 5. A zombie process counts as dead in the supervisor and in `isProcessAlive`, so a stop never waits on a bot that is already dead.
 - New tests in `tests/run-telegram-tests.mjs`, 15 groups, temp dirs only, mock Telegram API only, never api.telegram.org, no real token. `npm test` now runs 152 groups.
-- Still not done: no panel Start button yet (the supervisor contract is defined in `docs/V2-1-BOT-START-FROM-PANEL.md`, the panel change comes next), the running bot predates V2.1 and needs a restart to pick up the heartbeat and the poll fix, no webhook mode, no deploy from Telegram.
+- Still not done: the running bot predates V2.1 and needs a restart to pick up the heartbeat and the poll fix, no webhook mode, no deploy from Telegram. (Done since: the panel Start button restarts the bot, and the live bot now runs V2.1 code.)
 
 ## What V2.0 adds: Telegram Full Control
 

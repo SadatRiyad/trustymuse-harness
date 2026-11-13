@@ -2,6 +2,11 @@ node_modules/
 dist/
 state/
 state/telegram.json
+state/telegram-inbox.jsonl
+state/telegram-outbox.jsonl
+state/telegram-threads/
+state/telegram-relay-status.json
+state/telegram-relay.lock
 logs/
 packets/
 config.yaml
