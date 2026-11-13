@@ -380,3 +380,19 @@ still has to start and think, and the machine must be running. If
 the machine is off, messages wait in the inbox until the next run.
 The 1-minute relay job stays as a safety net. See
 `V2-4-LIVE-RELAY.md`.
+
+## 31. What happens when the Telegram bot crashes?
+
+Since V2.5 a watchdog hook watches the bot every 30 seconds and
+restarts it by itself. It checks the pid file and the heartbeat file:
+if the pid is dead, or the heartbeat is older than 90 seconds, it wakes
+a worker, and the worker restarts the bot only through the supervisor
+and verifies it came back within 60 seconds. A real crash test on
+2026-11-14 took about 70 seconds from kill to a healthy bot. It never
+restarts a bot you stopped on purpose: `telegram-stop` leaves a marker
+that the watchdog respects, and starting it again clears the marker. If
+the bot does not come back after 2 restart attempts, or crashes 3 times
+in 10 minutes, the watchdog stops trying, leaves the bot down, and says
+so plainly, so a real failure is not hidden by endless restarts. Start
+it again from the TrustyHarness panel or with `telegram-start`. See
+`V2-5-BOT-AUTO-RESTART.md`.

@@ -761,6 +761,11 @@ process, prefers the pid in `state/telegram-bot.pid`, and removes the
 pid file. A zombie counts as dead, so the stop never waits on a bot
 that is already dead.
 
+Since V2.5 the stop also writes `state/telegram-bot.stopped` before
+killing anything, so the auto-restart watchdog knows the stop was
+deliberate and never starts the bot again. A successful `telegram-start`
+clears the marker. See `V2-5-BOT-AUTO-RESTART.md`.
+
 ### telegram-status
 
 ```bash

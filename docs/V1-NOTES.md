@@ -1,6 +1,24 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V2.4.0 local only, multi-tenant, public repo. Version 2.4.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.2 code with the panel Start button, and the owner is allowlisted.
+Date: 2026-11-14. Status: V2.5.0 local only, multi-tenant, public repo. Version 2.5.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, and the owner is allowlisted.
+
+## What V2.5.0 changes: Bot Auto-Restart (watchdog hook)
+
+On 2026-11-14 about 02:40 +06 the Telegram bot died on a poll failure
+(`TypeError: fetch failed`) and stayed down until a manual restart,
+because nothing watched it. V2.5.0 adds a watchdog hook,
+`telegram-bot-watchdog`, which polls the bot pid file and heartbeat
+file every 30 seconds and wakes a worker only when the bot is dead or
+unresponsive. The worker restarts only through the supervisor, verifies
+the bot came back within 60 seconds, stays silent for routine
+restarts, and gives up after 2 failed attempts or 3 crashes in 10
+minutes, leaving the bot down and reporting plainly. It never restarts
+a bot the user stopped on purpose: `telegram-stop` writes
+`state/telegram-bot.stopped` before killing, and a successful start
+clears it. Live crash test on 2026-11-14: pid 3664 killed once, the
+watchdog woke 15 seconds later, the worker restarted it as pid 76416,
+healthy about 70 seconds after the kill, token and allowlist intact, no
+duplicate. See `V2-5-BOT-AUTO-RESTART.md`.
 
 ## What V2.4.1 changes: Atomic Relay Lock (duplicate-reply race fix)
 

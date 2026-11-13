@@ -1934,6 +1934,7 @@ function makeChatBot(root) {
       HATCH_HOOK_DRY_RUN: dryRun ? "1" : "0",
       TELEGRAM_INBOX_PATH: inboxPath,
       TELEGRAM_RELAY_LOCK_PATH: lockPath,
+      TELEGRAM_RELAY_LOCK_DIR_PATH: path.join(hookTmp, "no-lock-dir"),
     };
     execFileSync("bash", [hookScript], { env, encoding: "utf-8" });
     const lines = fs.readFileSync(decisionFile, "utf-8").trim().split("\n").filter(Boolean);
@@ -1981,6 +1982,15 @@ function makeChatBot(root) {
   assert.equal(decision.reason, "relay already running");
   assert.deepEqual(readState().seen, [101, 102, 103]);
 
+  // The atomic lock dir (V2.4.1 mkdir claim) also stays silent.
+  const lockDirPath = path.join(hookTmp, "no-lock-dir");
+  fs.mkdirSync(lockDirPath);
+  decision = runHook(false, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "relay already running");
+  assert.deepEqual(readState().seen, [101, 102, 103]);
+  fs.rmdirSync(lockDirPath);
+
   // A missing inbox stays silent.
   fs.rmSync(inboxPath);
   decision = runHook(false, path.join(hookTmp, "no-lock"));
@@ -1988,6 +1998,195 @@ function makeChatBot(root) {
   assert.equal(decision.reason, "no inbox file");
 
   ok("live relay hook script protocol, watermark, dry run, lock, and missing inbox");
+}
+
+// 67. Bot watchdog hook script: protocol lines, no token-like pattern,
+// and the detection logic on scratch pid and heartbeat files with a
+// stub runtime. Temp dirs only, never the real bot state, never
+// api.telegram.org.
+{
+  const hookScript = path.join(os.homedir(), "hooks", "scripts", "telegram-bot-watchdog.sh");
+  assert.ok(fs.existsSync(hookScript), "watchdog script exists");
+  fs.accessSync(hookScript, fs.constants.X_OK);
+  const scriptText = fs.readFileSync(hookScript, "utf-8");
+  for (const line of [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "HATCH_HOOK_RUNTIME",
+    "hook_state_get",
+    "hook_state_set",
+    "HATCH_HOOK_DRY_RUN",
+    "silent ",
+    "wake ",
+    "telegram-bot.stopped",
+    "telegram-bot-watchdog-disabled",
+  ]) {
+    assert.ok(scriptText.includes(line), `watchdog script contains ${line}`);
+  }
+  assert.ok(!/[0-9]{8,10}:[A-Za-z0-9_-]{30,}/.test(scriptText), "watchdog script holds no token-like pattern");
+  assert.ok(!/sk-[A-Za-z0-9]{10,}/.test(scriptText), "watchdog script holds no api key pattern");
+  assert.ok(!scriptText.includes("api.telegram.org"), "watchdog script never calls the Telegram API");
+  assert.ok(!scriptText.includes("kill -9") && !scriptText.includes("node dist/index.js"), "watchdog script never kills or starts anything itself");
+
+  // The supervisor writes the stopped marker on stop and clears both
+  // markers on a successful start, so the watchdog can trust them.
+  const supervisorText = fs.readFileSync(path.join(rootDir, "scripts", "telegram-bot-supervisor.sh"), "utf-8");
+  assert.ok(supervisorText.includes("telegram-bot.stopped"), "supervisor writes the stopped marker");
+  assert.ok(supervisorText.includes("clear_stop_markers"), "supervisor clears the markers on start");
+
+  const hookTmp = fs.mkdtempSync(path.join(os.tmpdir(), "trustymuse-harness-watchdog-test-"));
+  const hookStateDir = path.join(hookTmp, "state");
+  fs.mkdirSync(hookStateDir, { recursive: true });
+  const stubRuntime = path.join(hookTmp, "runtime.sh");
+  fs.writeFileSync(
+    stubRuntime,
+    [
+      "#!/usr/bin/env bash",
+      "HOOK_STATE_FILE=\"${HATCH_HOOK_STATE_DIR}/state.json\"",
+      "HOOK_DECISION_FILE=\"${HATCH_HOOK_STATE_DIR}/decision.log\"",
+      "hook_state_get() { cat \"$HOOK_STATE_FILE\" 2>/dev/null || echo '{}'; }",
+      "hook_state_set() { printf '%s' \"$1\" > \"$HOOK_STATE_FILE\"; }",
+      "silent() { printf '{\"decision\":\"silent\",\"reason\":\"%s\",\"payload\":%s}\\n' \"$1\" \"$2\" >> \"$HOOK_DECISION_FILE\"; }",
+      "wake() { printf '{\"decision\":\"wake\",\"reason\":\"%s\",\"payload\":%s}\\n' \"$1\" \"$2\" >> \"$HOOK_DECISION_FILE\"; }",
+      "log() { :; }",
+      "disable_after_run() { :; }",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  const pidPath = path.join(hookTmp, "telegram-bot.pid");
+  const heartbeatPath = path.join(hookTmp, "telegram-heartbeat.json");
+  const stoppedPath = path.join(hookTmp, "telegram-bot.stopped");
+  const disabledPath = path.join(hookTmp, "telegram-bot-watchdog-disabled");
+  const writePid = (pid) => fs.writeFileSync(pidPath, `${pid}\n`, "utf-8");
+  const writeHeartbeat = (ageSecs) =>
+    fs.writeFileSync(
+      heartbeatPath,
+      JSON.stringify({ lastPollAt: new Date(Date.now() - ageSecs * 1000).toISOString(), running: true, pid: process.pid, tenantId: "sadat-riyad", tokenSource: "file", allowlistCount: 1, lastError: null }, null, 2) + "\n",
+      "utf-8",
+    );
+  const decisionFile = path.join(hookStateDir, "decision.log");
+  const runHook = (dryRun) => {
+    const env = {
+      ...process.env,
+      HATCH_HOOK_RUNTIME: stubRuntime,
+      HATCH_HOOK_ID: "telegram-bot-watchdog",
+      HATCH_HOOK_STATE_DIR: hookStateDir,
+      HATCH_HOOK_DRY_RUN: dryRun ? "1" : "0",
+      TELEGRAM_BOT_PID_PATH: pidPath,
+      TELEGRAM_HEARTBEAT_PATH: heartbeatPath,
+      TELEGRAM_BOT_STOPPED_PATH: stoppedPath,
+      TELEGRAM_WATCHDOG_DISABLED_PATH: disabledPath,
+    };
+    execFileSync("bash", [hookScript], { env, encoding: "utf-8" });
+    const lines = fs.readFileSync(decisionFile, "utf-8").trim().split("\n").filter(Boolean);
+    return JSON.parse(lines[lines.length - 1]);
+  };
+  const readState = () => JSON.parse(fs.readFileSync(path.join(hookStateDir, "state.json"), "utf-8"));
+  const DEAD_PID = 99999999;
+
+  // Healthy bot: live pid and a fresh heartbeat stay silent.
+  writePid(process.pid);
+  writeHeartbeat(10);
+  let decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "bot healthy");
+
+  // Dead pid wakes, and the watermark records it.
+  writePid(DEAD_PID);
+  decision = runHook(false);
+  assert.equal(decision.decision, "wake");
+  assert.equal(decision.reason, "bot crashed");
+  assert.equal(decision.payload.lastPid, DEAD_PID);
+  assert.equal(readState().lastWake.key, `bot crashed:${DEAD_PID}`);
+
+  // The next poll inside the cooldown stays silent for the same failure.
+  decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "already woken for this failure");
+
+  // A dry run for a NEW failure wakes but does not move the watermark:
+  // the dedup above stays silent for the same failure inside the
+  // cooldown, so the dry run uses a different dead pid.
+  const DEAD_PID2 = 99999998;
+  writePid(DEAD_PID2);
+  const watermarkBefore = readState().lastWake.at;
+  decision = runHook(true);
+  assert.equal(decision.decision, "wake");
+  assert.equal(decision.reason, "bot crashed");
+  assert.equal(decision.payload.lastPid, DEAD_PID2);
+  assert.equal(readState().lastWake.at, watermarkBefore);
+  assert.equal(readState().lastWake.key, `bot crashed:${DEAD_PID}`);
+
+  // The real run then wakes for the same new failure and records it.
+  decision = runHook(false);
+  assert.equal(decision.decision, "wake");
+  assert.equal(decision.reason, "bot crashed");
+  assert.equal(readState().lastWake.key, `bot crashed:${DEAD_PID2}`);
+
+  // A live pid with a stale heartbeat wakes as unresponsive.
+  writePid(process.pid);
+  writeHeartbeat(200);
+  decision = runHook(false);
+  assert.equal(decision.decision, "wake");
+  assert.equal(decision.reason, "bot unresponsive");
+  assert.equal(decision.payload.lastPid, process.pid);
+
+  // The stopped marker stays silent even with a dead pid.
+  writePid(DEAD_PID);
+  writeHeartbeat(10);
+  fs.writeFileSync(stoppedPath, "stopped by the user\n", "utf-8");
+  decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "bot stopped on purpose");
+  fs.rmSync(stoppedPath);
+
+  // The watchdog-disabled marker stays silent too.
+  fs.writeFileSync(disabledPath, "watchdog gave up\n", "utf-8");
+  decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "auto-restart disabled by watchdog");
+  fs.rmSync(disabledPath);
+
+  // A missing pid file stays silent: never started, or stopped on purpose.
+  fs.rmSync(pidPath);
+  decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "no bot pid file");
+
+  // No heartbeat yet, but the pid file is fresh: the bot just started.
+  writePid(process.pid);
+  fs.rmSync(heartbeatPath);
+  decision = runHook(false);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "bot just started, no heartbeat yet");
+
+  // No heartbeat and an old pid file: unresponsive. A fresh live pid
+  // is used so the failure key differs from the stale heartbeat case
+  // above, which the dedup would otherwise silence inside its window.
+  const sleeper = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  try {
+    writePid(sleeper.pid);
+    const old = new Date(Date.now() - 200 * 1000);
+    fs.utimesSync(pidPath, old, old);
+    decision = runHook(false);
+    assert.equal(decision.decision, "wake");
+    assert.equal(decision.reason, "bot unresponsive");
+    assert.equal(decision.payload.lastPid, sleeper.pid);
+  } finally {
+    try {
+      process.kill(sleeper.pid);
+    } catch {}
+  }
+
+  // An unreadable pid file wakes instead of crashing the script.
+  fs.writeFileSync(pidPath, "not-a-pid\n", "utf-8");
+  decision = runHook(false);
+  assert.equal(decision.decision, "wake");
+  assert.equal(decision.reason, "unreadable pid file");
+  assert.equal(decision.payload.lastPid, 0);
+
+  ok("bot watchdog hook script protocol, detection, dedup, dry run, and stop markers");
 }
 
 console.log(`All ${passed} telegram test groups passed. Temp dir: ${tmp}`);

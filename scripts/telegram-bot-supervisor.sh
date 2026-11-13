@@ -205,11 +205,17 @@ cmd_start() {
     rm -f "$PID_FILE"
     return 1
   fi
+  clear_stop_markers
   echo "Telegram bot started (pid $pid). Log: logs/telegram-bot.log. Stop it with: node dist/index.js telegram-stop"
   return 0
 }
 
 cmd_stop() {
+  # The stop is deliberate: record it before killing anything, so the
+  # auto-restart watchdog stays silent even in the short window while
+  # the pid is already dead and the pid file is not removed yet.
+  mkdir -p "$(dirname "$STOPPED_FILE")"
+  touch "$STOPPED_FILE"
   local recorded target
   recorded=$(recorded_pid)
   if [ -n "$recorded" ] && pid_is_bot "$recorded" && pid_is_live "$recorded"; then

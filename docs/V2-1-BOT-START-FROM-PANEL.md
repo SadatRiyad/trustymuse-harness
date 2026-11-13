@@ -47,7 +47,18 @@ for getUpdates: HTTP 409`. See the poll loop section below.
 The panel change comes after this CLI work. It must use exactly this
 contract, no other way to start or stop the bot.
 
-### Commands
+### Auto-restart (V2.5.0)
+
+A watchdog hook, `telegram-bot-watchdog`, polls the bot pid file and
+heartbeat file every 30 seconds and restarts a crashed or unresponsive
+bot through this supervisor. It never restarts a bot stopped on
+purpose: `stop` writes `state/telegram-bot.stopped` first, and a
+successful `start` clears it. The worker gives up after 2 failed
+restart attempts or 3 crashes in 10 minutes, writes
+`state/telegram-bot-watchdog-disabled`, and reports plainly instead of
+restarting forever. See `docs/V2-5-BOT-AUTO-RESTART.md`.
+
+## Commands
 
 - Start: `node dist/index.js telegram-start [--tenant <id>]`
 - Stop: `node dist/index.js telegram-stop`
@@ -219,6 +230,10 @@ through the heartbeat, and it can still hit the 409 overlap.
 - No panel Start button yet. The supervisor and the CLI contract are
   built; the panel change that calls them comes next.
 - No live bot run on V2.1 code yet. The running bot predates V2.1 and
-  needs a restart to pick up the heartbeat and the poll fix.
+  needs a restart to pick up the heartbeat and the poll fix. Update
+  2026-11-14: the bot has since been restarted many times, most
+  recently by the V2.5 watchdog after a live crash test, and now runs
+  current code with a fresh heartbeat. The line above is kept as
+  history.
 - No webhook mode. Long polling only.
 - No deploy from Telegram. The deploy gate is unchanged from V2.0.
