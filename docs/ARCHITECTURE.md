@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs ten suites, 167 test groups in
+`npm test` builds the code, then runs ten suites, 182 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9, analytics 11, telegram 65. All suites use temp folders only, the mock driver, or
+15, connection 30, model-connect 9, analytics 11, telegram 65. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -412,8 +412,13 @@ every design choice.
   Telegram a Muse channel: plain text is queued in the inbox for a
   scheduled relay job run by Muse, which answers it and writes the
   reply to the outbox for the bot to deliver. The relay cron job is
-  created after the V2.2 build. See
-  `V2-2-TELEGRAM-MUSE-CHANNEL.md`.
+  created after the V2.2 build. V2.3 adds cloud browser accounts: an
+  account record gains a source field, profile or cloud, and a cloud
+  account is verified by a browser task with `--verified-via` and
+  `--verified-note`, never by the driver. Its jobs run from Muse
+  through the cloud browser, never from the CLI, and are audit-logged
+  with `cloud-job-log`. Packet mode is the last resort, not the
+  default. See `V2-3-CLOUD-BROWSER.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a

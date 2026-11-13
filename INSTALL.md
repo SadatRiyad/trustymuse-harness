@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V2.2 runs 167 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 65.
+All test suites must pass before you use it. V2.3 runs 182 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 30, model-connect 9, analytics 11, telegram 65.
 
 If Chromium is missing for browser mode, install it with:
 

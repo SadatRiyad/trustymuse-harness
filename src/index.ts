@@ -26,10 +26,13 @@ import { MockBrowserDriver, PlaywrightBrowserDriver } from "./session/browser";
 import { BrowserQueue } from "./session/queue";
 import {
   assertBrowserConnected,
+  cloudJobRefusal,
   connectBrowser,
+  connectCloudBrowser,
   disconnectBrowser,
   formatConnectionLine,
   listConnectionStatuses,
+  recordCloudJob,
 } from "./session/connection";
 import {
   addProject,
@@ -78,7 +81,13 @@ import {
   TelegramHttpApi,
 } from "./telegram/bot";
 
-// TrustyMUSE Harness V2.2 CLI. Local only, multi-tenant.
+// TrustyMUSE Harness V2.3 CLI. Local only, multi-tenant.
+// V2.3 adds cloud browser mode: an account can use the cloud browser
+// (Muse's browser, where the user is already logged in) instead of a
+// harness Playwright profile. A cloud account is verified by a browser
+// task, never by the driver, and its jobs run from Muse, never from the
+// CLI. Packet mode is now the last resort, for a model with no connected
+// account anywhere, not the default.
 // V2.2 makes Telegram a Muse channel: plain text that is not a
 // command is queued in the inbox for a scheduled relay job run by
 // Muse, which answers it and writes the reply to the outbox for the
@@ -124,11 +133,12 @@ import {
 //   node dist/index.js packet --model chatgpt --type seo --title "My task" --task "Write a draft." [--project my-project] [--tenant <id>]
 //   node dist/index.js check-api --provider openai [--tenant <id>]
 //   node dist/index.js audit [--tenant <id>]
-//   node dist/index.js account-add --provider chatgpt --id main --label "Main ChatGPT" [--tenant <id>]
+//   node dist/index.js account-add --provider chatgpt --id main --label "Main ChatGPT" [--source cloud] [--tenant <id>]
 //   node dist/index.js account-list [--tenant <id>]
-//   node dist/index.js browser-connect --account main [--tenant <id>]
+//   node dist/index.js browser-connect --account main [--verified-via <browser task id> --verified-note "..."] [--tenant <id>]
 //   node dist/index.js browser-disconnect --account main [--reason "..."] [--tenant <id>]
 //   node dist/index.js browser-status [--tenant <id>]
+//   node dist/index.js cloud-job-log --account main --model chatgpt --task "Short task" --result ok|failed [--type <type>] [--detail "..."] [--tenant <id>]
 //   node dist/index.js session-status [--tenant <id>]
 //   node dist/index.js run-browser --model chatgpt --account main --type seo --task "Write a draft." [--project my-project] [--tenant <id>]
 //   node dist/index.js project-add --id my-project --name "My Project" --kind web-app --path ~/workspace/my-project [--tenant <id>]
@@ -165,17 +175,18 @@ function getArg(args: string[], name: string, fallback: string): string {
 }
 
 function printHelp(): void {
-  console.log("TrustyMUSE Harness V2.2");
+  console.log("TrustyMUSE Harness V2.3");
   console.log("Usage:");
   console.log("  node dist/index.js status [--tenant <id>]");
   console.log("  node dist/index.js packet --model chatgpt --type seo --title \"Title\" --task \"Task text\" [--project my-project] [--tenant <id>]");
   console.log("  node dist/index.js check-api --provider openai [--tenant <id>]");
   console.log("  node dist/index.js audit [--tenant <id>]");
-  console.log("  node dist/index.js account-add --provider chatgpt --id main --label \"Main ChatGPT\" [--tenant <id>]");
+  console.log("  node dist/index.js account-add --provider chatgpt --id main --label \"Main ChatGPT\" [--source cloud] [--tenant <id>]");
   console.log("  node dist/index.js account-list [--tenant <id>]");
-  console.log("  node dist/index.js browser-connect --account main [--tenant <id>]");
+  console.log("  node dist/index.js browser-connect --account main [--verified-via <browser task id> --verified-note \"...\"] [--tenant <id>]");
   console.log("  node dist/index.js browser-disconnect --account main [--reason \"...\"] [--tenant <id>]");
   console.log("  node dist/index.js browser-status [--tenant <id>]");
+  console.log("  node dist/index.js cloud-job-log --account main --model chatgpt --task \"Short task\" --result ok|failed [--type <type>] [--detail \"...\"] [--tenant <id>]");
   console.log("  node dist/index.js session-status [--tenant <id>]");
   console.log("  node dist/index.js run-browser --model chatgpt --account main --type seo --task \"Task text\" [--project my-project] [--tenant <id>]");
   console.log("  node dist/index.js project-add --id my-project --name \"My Project\" --kind web-app --path ~/workspace/my-project [--live-url https://example.com] [--repo owner/repo] [--stack \"Node.js\"] [--tasks seo,blog] [--notes \"...\"] [--tenant <id>]");
@@ -657,13 +668,17 @@ async function main(): Promise<void> {
 
   if (command === "status") {
     const status = budget.getStatus();
-    console.log("TrustyMUSE Harness V2.0 status");
+    console.log("TrustyMUSE Harness V2.3 status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${ctx.tenant.id}), ${tenantCount} tenant(s) on this install`);
     console.log(`Mode: ${config.subscriptionEnabled ? "subscription" : "none"}${config.apiEnabled ? " + api" : ""}${config.browser.enabled ? " + browser" : ""}`);
     console.log(`Browser: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}, headless ${config.browser.headless}, pacing ${config.browser.pacingMs} ms, daily limit ${config.browser.dailyLimitPerAccount} per account, max accounts ${config.browser.maxAccounts}`);
     const browserAccounts = loadAccounts(rootDir, tenantId);
     const connectedAccounts = browserAccounts.filter((a) => a.browserConnected === true).length;
-    console.log(`Browser connections: ${connectedAccounts} of ${browserAccounts.length} account(s) connected. Connect one with browser-connect --account <id>, stop one with browser-disconnect --account <id>.`);
+    const cloudAccounts = browserAccounts.filter((a) => a.source === "cloud");
+    const cloudConnected = cloudAccounts.filter((a) => a.browserConnected === true).length;
+    const profileAccounts = browserAccounts.filter((a) => a.source !== "cloud");
+    const profileConnected = profileAccounts.filter((a) => a.browserConnected === true).length;
+    console.log(`Browser connections: ${connectedAccounts} of ${browserAccounts.length} account(s) connected (${cloudConnected} of ${cloudAccounts.length} cloud, ${profileConnected} of ${profileAccounts.length} profile). Cloud jobs run from Muse through the cloud browser, never from the CLI.`);
     const projects = listProjects(rootDir, tenantId);
     const activeProjects = projects.filter((p) => p.status === "active").length;
     console.log(`Projects: ${projects.length} connected (${activeProjects} active), max ${config.projects.maxProjects}`);
@@ -683,7 +698,7 @@ async function main(): Promise<void> {
     }
     const connectedModels = listConnectedModels(ctx);
     console.log(
-      `Connected subscription models for tenant ${tenantId}: ${connectedModels.map((m) => m.id).join(", ") || "none"}. Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude.`,
+      `Connected subscription models for tenant ${tenantId}: ${connectedModels.map((m) => m.id).join(", ") || "none"}. Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude. A connected cloud account runs through Muse, not the CLI driver; packet mode is the last resort, not the default.`,
     );
     console.log(CONNECTED_LEGEND);
     console.log("Routes:");
@@ -818,22 +833,29 @@ async function main(): Promise<void> {
     const provider = getArg(args, "--provider", "");
     const id = getArg(args, "--id", "");
     const label = getArg(args, "--label", "");
+    const source = getArg(args, "--source", "profile");
     if (!provider || !id || !label) {
-      console.log("Usage: node dist/index.js account-add --provider chatgpt --id main --label \"Main ChatGPT\"");
+      console.log("Usage: node dist/index.js account-add --provider chatgpt --id main --label \"Main ChatGPT\" [--source cloud]");
       console.log("No password is asked for and no password is stored. Log in once by hand in the profile later.");
+      console.log("Source profile (default) uses a harness Playwright profile for chatgpt or claude. Source cloud records a model you are already logged in to in the cloud browser, for any subscription model, and it has no local profile.");
       return;
     }
     try {
       const account = addAccount(
-        { provider, id, label },
+        { provider, id, label, source },
         // Base profiles root only: addAccount appends the tenant id once
         // via tenantProfileRoot. Passing ctx.profileRoot here would append
         // it a second time (profiles/<tenant>/<tenant>/...).
         { rootDir, profileRoot: path.join(rootDir, "profiles"), maxAccounts: config.browser.maxAccounts, tenantId },
       );
-      console.log(`Account added: ${account.id} (${account.provider}, ${account.label})`);
-      console.log(`Profile dir: ${account.profileDir}`);
-      console.log("Next step: log in once by hand in that profile, in your own browser. The harness never asks for your password.");
+      console.log(`Account added: ${account.id} (${account.provider}, ${account.label}, source ${account.source})`);
+      if (account.source === "cloud") {
+        console.log("Cloud browser account: no local profile. Verify it after a browser task checks the login in the cloud browser:");
+        console.log(`  node dist/index.js browser-connect --account ${account.id} --verified-via <browser task id> --verified-note "<what the browser task observed>"`);
+      } else {
+        console.log(`Profile dir: ${account.profileDir}`);
+        console.log("Next step: log in once by hand in that profile, in your own browser. The harness never asks for your password.");
+      }
       appendAudit(
         { at: new Date().toISOString(), runId, event: "account_added", model: account.provider, detail: account.id, result: "ok" },
         rootDir,
@@ -854,13 +876,15 @@ async function main(): Promise<void> {
     console.log(`Browser accounts for tenant ${tenantId}: ${accounts.length}`);
     for (const account of accounts) {
       const connected = account.browserConnected === true ? `connected, verified ${account.browserLastVerified || "never"}` : "disconnected";
-      console.log(`  ${account.id} (${account.provider}, ${account.label}, ${connected}, status ${account.status}, enabled ${account.enabled}, profile ${account.profileDir}, today ${account.dailyCount} jobs, last used ${account.lastUsed || "never"})`);
+      const where = account.source === "cloud" ? "cloud browser" : `profile ${account.profileDir}`;
+      const verified = account.source === "cloud" && account.verifiedVia ? `, verified via ${account.verifiedVia}: ${account.verifiedNote || ""}` : "";
+      console.log(`  ${account.id} (${account.provider}, ${account.label}, source ${account.source}, ${connected}, status ${account.status}, enabled ${account.enabled}, ${where}, today ${account.dailyCount} jobs, last used ${account.lastUsed || "never"}${verified})`);
     }
     return;
   }
 
   if (command === "session-status") {
-    console.log("TrustyMUSE Harness V2.0 browser session status");
+    console.log("TrustyMUSE Harness V2.3 browser session status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Browser mode: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}`);
     console.log(`Headless: ${config.browser.headless}, profile root: ${ctx.profileRoot}`);
@@ -882,7 +906,66 @@ async function main(): Promise<void> {
     const accountId = getArg(args, "--account", "");
     if (!accountId) {
       console.log("Usage: node dist/index.js browser-connect --account main [--tenant <id>]");
+      console.log("For a cloud account: node dist/index.js browser-connect --account main --verified-via <browser task id> --verified-note \"<what the browser task observed>\"");
       console.log("Connect verifies the login by opening the account profile with the driver. It never types a password and never auto solves a challenge.");
+      return;
+    }
+    const earlyAccount = getAccount(accountId, rootDir, tenantId);
+    if (!earlyAccount) {
+      console.log(`Account ${accountId} was not found for tenant ${tenantId}. Use account-list to see existing accounts. No state was changed.`);
+      appendAudit(
+        { at: new Date().toISOString(), runId, event: "browser_connect_blocked", detail: accountId, result: "blocked" },
+        rootDir,
+        tenantId,
+      );
+      return;
+    }
+    // Cloud branch, V2.3: a cloud account is verified by a browser task
+    // that checked the login in the cloud browser, never by the driver.
+    // Both evidence flags are required, and the evidence is stored on
+    // the account and in the audit log.
+    if (earlyAccount.source === "cloud") {
+      const verifiedVia = getArg(args, "--verified-via", "");
+      const verifiedNote = getArg(args, "--verified-note", "");
+      if (!verifiedVia || !verifiedNote) {
+        console.log("Cloud accounts are verified by a browser task, not by the driver. The login must be checked in the cloud browser first.");
+        console.log(`Run: node dist/index.js browser-connect --account ${accountId} --verified-via <browser task id> --verified-note "<what the browser task observed>"`);
+        appendAudit(
+          { at: new Date().toISOString(), runId, event: "browser_connect_blocked", detail: accountId, result: "blocked" },
+          rootDir,
+          tenantId,
+        );
+        return;
+      }
+      try {
+        const account = connectCloudBrowser(ctx, accountId, { verifiedVia, verifiedNote }, { hold: config.hold });
+        console.log(`Browser connected for tenant ${tenantId}: ${account.id} (${account.provider}, ${account.label}, cloud browser).`);
+        console.log(`Verified at ${account.verifiedAt} via ${account.verifiedVia}: ${account.verifiedNote}`);
+        console.log("Cloud jobs for this account run from Muse through the cloud browser, never from the CLI.");
+        appendAudit(
+          { at: new Date().toISOString(), runId, event: "browser_connected", model: account.provider, detail: `account:${account.id} verifiedVia:${account.verifiedVia} verifiedNote:${account.verifiedNote}`, result: "ok" },
+          rootDir,
+          tenantId,
+        );
+      } catch (error) {
+        console.log(`Browser was not connected. ${String(error).replace(/^Error: /, "")}`);
+        appendAudit(
+          { at: new Date().toISOString(), runId, event: "browser_connect_blocked", detail: accountId, result: "blocked" },
+          rootDir,
+          tenantId,
+        );
+      }
+      return;
+    }
+    // Profile accounts never take verification flags: the driver does
+    // the verification by opening the profile.
+    if (getArg(args, "--verified-via", "") || getArg(args, "--verified-note", "")) {
+      console.log("--verified-via and --verified-note only apply to cloud accounts. A profile account is verified by the driver opening its profile.");
+      appendAudit(
+        { at: new Date().toISOString(), runId, event: "browser_connect_blocked", detail: accountId, result: "blocked" },
+        rootDir,
+        tenantId,
+      );
       return;
     }
     const useMock = process.env.TRUSTYMUSE_BROWSER_MOCK === "1";
@@ -945,11 +1028,44 @@ async function main(): Promise<void> {
       console.log("Then log in once by hand in that profile, and verify it with: node dist/index.js browser-connect --account main");
       return;
     }
-    console.log(`Browser connections for tenant ${tenantId}: ${statuses.filter((s) => s.connected).length} of ${statuses.length} connected.`);
+    const cloudStatuses = statuses.filter((s) => s.source === "cloud");
+    const cloudConnected = cloudStatuses.filter((s) => s.connected).length;
+    console.log(`Browser connections for tenant ${tenantId}: ${statuses.filter((s) => s.connected).length} of ${statuses.length} connected (${cloudConnected} of ${cloudStatuses.length} cloud, ${statuses.filter((s) => s.connected).length - cloudConnected} of ${statuses.length - cloudStatuses.length} profile).`);
     for (const status of statuses) {
       console.log(formatConnectionLine(status));
     }
     appendAudit({ at: new Date().toISOString(), runId, event: "browser_status_checked", result: "ok" }, rootDir, tenantId);
+    return;
+  }
+
+  // Cloud job log, V2.3. Records one cloud browser job in the audit
+  // log. The job itself runs from Muse through the cloud browser, never
+  // from the CLI: this command only records that it ran, with the
+  // account, the model, a short task description, and the result. The
+  // relay calls it after every cloud job, so the audit log holds the
+  // same evidence for cloud jobs as for profile browser jobs.
+  if (command === "cloud-job-log") {
+    const accountId = getArg(args, "--account", "");
+    const model = getArg(args, "--model", "");
+    const task = getArg(args, "--task", "");
+    const result = getArg(args, "--result", "");
+    const taskType = getArg(args, "--type", "general");
+    const detail = getArg(args, "--detail", "");
+    if (!accountId || !model || !task || !result) {
+      console.log("Usage: node dist/index.js cloud-job-log --account <id> --model <model> --task \"<short task>\" --result ok|failed [--type <type>] [--detail \"...\"]");
+      console.log("Records one cloud browser job in the audit log. The job itself runs from Muse through the cloud browser, never from the CLI.");
+      return;
+    }
+    if (config.hold) {
+      console.log("HOLD is on. Cloud jobs are blocked until HOLD is lifted by the user. Nothing was logged.");
+      return;
+    }
+    try {
+      const account = recordCloudJob(ctx, accountId, model, { result, task, taskType, detail });
+      console.log(`Cloud browser job logged for tenant ${tenantId}: ${account.id} (${model}, ${result}, today ${account.dailyCount} jobs).`);
+    } catch (error) {
+      console.log(`Cloud browser job was not logged. ${String(error).replace(/^Error: /, "")}`);
+    }
     return;
   }
 
@@ -960,6 +1076,26 @@ async function main(): Promise<void> {
     const title = getArg(args, "--title", "Untitled task");
     const task = getArg(args, "--task", "Write a clear draft for this task.");
     const projectId = getArg(args, "--project", "");
+    // Cloud branch, V2.3, first: a cloud account never reaches the
+    // driver, the browser mode flag, or the packet fallback. This check
+    // runs before assertBrowserAllowed, because a cloud account for a
+    // packet-only model like gemini is still a real browser account,
+    // just one that runs through Muse instead of the CLI.
+    if (accountId) {
+      const earlyAccount = getAccount(accountId, rootDir, tenantId);
+      if (earlyAccount && earlyAccount.source === "cloud" && earlyAccount.provider === model) {
+        const refusal = cloudJobRefusal(earlyAccount, model);
+        if (refusal) {
+          console.log(`Browser job was not started. ${refusal}`);
+          appendAudit(
+            { at: new Date().toISOString(), runId, event: earlyAccount.browserConnected === true ? "browser_blocked_cloud" : "browser_blocked_not_connected", model, detail: accountId, result: "blocked" },
+            rootDir,
+            tenantId,
+          );
+          return;
+        }
+      }
+    }
     // Browser gate: only models with a wired driver may run here. Every
     // packet-only model is refused with a clear message, even when an
     // account exists for it, because no login or selector is verified.
@@ -1451,7 +1587,7 @@ async function main(): Promise<void> {
     }
     const api = new TelegramHttpApi(token);
     const bot = createTelegramBot({ rootDir, ctx, config, api });
-    console.log("TrustyMUSE Harness V2.2 Telegram bot starting...");
+    console.log("TrustyMUSE Harness V2.3 Telegram bot starting...");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId}). Only allowlisted Telegram users get a reply.`);
     console.log("Link a user first with: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
     console.log("Stop the bot with telegram-stop. HOLD blocks every write from Telegram. /run runs one browser job on a connected account. Nothing here ever deploys.");

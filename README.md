@@ -55,7 +55,7 @@ node dist/index.js packet --model chatgpt --type seo --title "First task" --task
   writes.
 - **Audit log.** Every packet, check, block, and result is written to an
   append only audit log, per tenant.
-- **Telegram full control.** A Telegram Bot runs everything the harness can do from your phone: projects, models, tasks, HOLD, one browser job at a time on a connected account with `/run`, and plain-language `/do` instructions into packets or a plan-then-audit pipeline. Only allowlisted Telegram user ids get a reply. The token comes from `TELEGRAM_BOT_TOKEN` first, then from the file token in `state/telegram.json`. V2.1 starts the bot from the dashboard, not the terminal: `telegram-start` is supervisor-managed, the bot writes a heartbeat on every poll, and the poll loop never overlaps `getUpdates`. V2.2 makes Telegram a Muse channel: plain text that is not a command is queued for a scheduled relay job run by Muse, which answers it within a few minutes. Nothing here ever deploys. See `docs/V2-2-TELEGRAM-MUSE-CHANNEL.md`.
+- **Telegram full control.** A Telegram Bot runs everything the harness can do from your phone: projects, models, tasks, HOLD, one browser job at a time on a connected account with `/run`, and plain-language `/do` instructions into packets or a plan-then-audit pipeline. Only allowlisted Telegram user ids get a reply. The token comes from `TELEGRAM_BOT_TOKEN` first, then from the file token in `state/telegram.json`. V2.1 starts the bot from the dashboard, not the terminal: `telegram-start` is supervisor-managed, the bot writes a heartbeat on every poll, and the poll loop never overlaps `getUpdates`. V2.2 makes Telegram a Muse channel: plain text that is not a command is queued for a scheduled relay job run by Muse, which answers it within a few minutes. V2.3 adds cloud browser accounts: a model you are already logged in to in the cloud browser is verified by a browser task, never by the driver, and its jobs run from Muse through the cloud browser, never from the CLI. Packet mode is the last resort, not the default. Nothing here ever deploys. See `docs/V2-3-CLOUD-BROWSER.md`.
 
 ## Safety rules
 
@@ -96,7 +96,7 @@ fails. Developers start with
 [`docs/README.md`](docs/README.md).
 
 - [`INSTALL.md`](INSTALL.md): install, setup, tenants, migration.
-- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V2.2 do, and
+- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V2.3 do, and
   what they do not do.
 - [`docs/V1-1-BROWSER-MODE.md`](docs/V1-1-BROWSER-MODE.md): browser
   session mode and the risk disclosure.
@@ -135,8 +135,8 @@ node dist/index.js setup --id jane-doe --name "Jane Doe"
 node dist/index.js status
 ```
 
-`npm test` runs 167 test groups: V1 7, browser 10, live driver 9,
-projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 65. Do not use the
+`npm test` runs 182 test groups: V1 7, browser 10, live driver 9,
+projects 12, tenants 14, models 15, connection 30, model-connect 9, analytics 11, telegram 65. Do not use the
 harness until the tests pass.
 
 First packet job. Connect ChatGPT first, because a fresh tenant starts

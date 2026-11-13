@@ -67,3 +67,6 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
 - [`V2-2-TELEGRAM-MUSE-CHANNEL.md`](V2-2-TELEGRAM-MUSE-CHANNEL.md):
   Telegram as a Muse channel, chat mode, the inbox and outbox queues,
   the relay contract, and the thread file.
+- [`V2-3-CLOUD-BROWSER.md`](V2-3-CLOUD-BROWSER.md):
+  cloud browser accounts, the two logins, verification by a browser
+  task, cloud jobs from Muse, and packet mode as the last resort.

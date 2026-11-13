@@ -436,3 +436,31 @@ to 4 minutes. If the relay has run and the outbox pending count stays
 above zero, the bot is not delivering: check `telegram-status` for
 RUNNING and the heartbeat last poll time. See
 `V2-2-TELEGRAM-MUSE-CHANNEL.md` and `scripts/telegram-relay.md`.
+
+## 20. `run-browser` refuses a cloud account, or the relay asked me to copy and paste
+
+Symptom: `run-browser --model gemini --account gem` prints "This is
+a cloud browser account. A cloud browser job never runs from the
+CLI." Or the relay sent you a packet to run by hand even though you
+are already logged in to that model in your browser.
+
+Cause: a cloud account and a profile account are two different
+logins. The cloud browser login does not carry over to a harness
+profile, and the harness profile login does not carry over to the
+cloud browser. `run-browser` only ever drives profile accounts. A
+cloud job runs from Muse, through the cloud browser, never from the
+CLI. If the relay asked you to copy and paste, it found no connected
+account for that model: either the cloud account was never recorded,
+or it was never verified.
+
+Fix: check the accounts with `node dist/index.js account-list` and
+`node dist/index.js browser-status`. The line says the source and,
+for a cloud account, the verification note. If the account is missing,
+add it with
+`node dist/index.js account-add --provider <model> --id <id> --label "<Label>" --source cloud`.
+If it is disconnected, verify it with
+`node dist/index.js browser-connect --account <id> --verified-via <browser task id> --verified-note "<what the browser task observed>"`.
+Once a cloud account for that model is connected, the relay runs the
+job itself through the cloud browser and tells you the paste is no
+longer needed. A waiting packet job switches to the cloud path as
+soon as the account connects. See `V2-3-CLOUD-BROWSER.md`.

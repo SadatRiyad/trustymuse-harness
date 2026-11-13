@@ -1,4 +1,4 @@
-# TrustyMUSE Harness V2.1 example config.
+# TrustyMUSE Harness V2.3 example config.
 # Copy this file to config.yaml to change settings.
 # Do not put any API key in this file. Keys only come from environment variables.
 # Monthly budget cap default is 0. With 0, every paid API call is blocked.
@@ -9,6 +9,13 @@
 # browser-disconnect (V1.6). Connect verifies the login before it claims
 # connected. Disconnect never deletes the profile or logs you out.
 # See docs/V1-6-BROWSER-CONNECT.md.
+# Cloud browser accounts (V2.3): a model you are already logged in to in
+# the cloud browser is recorded with account-add --source cloud and
+# verified with browser-connect --verified-via <browser task id>
+# --verified-note "<what the browser task observed>". Its jobs run from
+# Muse through the cloud browser, never from the CLI. Packet mode is the
+# last resort, for a model with no connected account anywhere.
+# See docs/V2-3-CLOUD-BROWSER.md.
 # Projects: at most 20 connected projects by default. See docs/V1-3-PROJECTS.md.
 # Tenants: one tenant is one Muse account. The default tenant is used when
 # no --tenant flag and no TRUSTYMUSE_TENANT variable is given. At most 10
@@ -26,7 +33,7 @@
 
 harness:
   name: trustymuse-harness
-  version: 2.2.0
+  version: 2.3.0
   mode: subscription
 
 budget:

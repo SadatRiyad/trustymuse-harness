@@ -72,7 +72,7 @@ import { getAccount, loadAccounts, saveAccounts } from "../session/accounts";
 import type { BrowserAccount } from "../session/accounts";
 import { MockBrowserDriver, PlaywrightBrowserDriver } from "../session/browser";
 import type { BrowserDriver } from "../session/browser";
-import { formatConnectionLine, listConnectionStatuses, assertBrowserConnected } from "../session/connection";
+import { cloudJobRefusal, formatConnectionLine, listConnectionStatuses, assertBrowserConnected } from "../session/connection";
 import { BrowserQueue } from "../session/queue";
 import { tenantCapUsd, TenantContext } from "../tenants/context";
 import {
@@ -2173,6 +2173,19 @@ export class TelegramBot {
         detail: `account:${accountId}`,
       };
     }
+    // Cloud guard, V2.3: a connected cloud account never reaches the
+    // driver. Cloud jobs run from Muse through the cloud browser, never
+    // from /run, and never fall back to a packet.
+    const cloudRefusal = cloudJobRefusal(account, model);
+    if (cloudRefusal) {
+      return {
+        reply: `Browser job was not started. ${cloudRefusal}`,
+        event: "telegram_browser_job_blocked",
+        result: "blocked",
+        model,
+        detail: `account:${accountId}`,
+      };
+    }
     let outcome: BrowserJobOutcome;
     try {
       outcome = await this.executeBrowserJob(account, model, taskType, title, task, projectId);
@@ -2328,12 +2341,26 @@ export class TelegramBot {
       }
     }
     const accounts = loadAccounts(this.rootDir, this.ctx.tenantId);
+    // The driver only ever runs profile accounts, V2.3. A connected
+    // cloud account is not a missing account: it runs through the
+    // relay or the Muse app chat, not through /do, so it is named in
+    // the packet fallback reply instead of being silently skipped.
     const planAccount = accounts.find(
-      (a) => a.provider === planModel && a.browserConnected === true && a.status === "active" && a.enabled,
+      (a) => a.provider === planModel && a.source === "profile" && a.browserConnected === true && a.status === "active" && a.enabled,
     );
     const auditAccount = accounts.find(
-      (a) => a.provider === auditModel && a.browserConnected === true && a.status === "active" && a.enabled,
+      (a) => a.provider === auditModel && a.source === "profile" && a.browserConnected === true && a.status === "active" && a.enabled,
     );
+    const planCloud = accounts.find(
+      (a) => a.provider === planModel && a.source === "cloud" && a.browserConnected === true && a.status === "active" && a.enabled,
+    );
+    const auditCloud = accounts.find(
+      (a) => a.provider === auditModel && a.source === "cloud" && a.browserConnected === true && a.status === "active" && a.enabled,
+    );
+    const cloudModels = [planCloud ? planModel : null, auditCloud ? auditModel : null].filter(Boolean);
+    const cloudNote = cloudModels.length > 0
+      ? ` A connected cloud browser account exists for ${cloudModels.join(" and ")}; cloud jobs run through the Telegram relay or the Muse app chat, not through /do.`
+      : "";
     const shortTitle = plan.taskText.slice(0, 40) || "Untitled task";
     if (!planAccount || !auditAccount) {
       const missing = [!planAccount ? planModel : null, !auditAccount ? auditModel : null].filter(Boolean).join(" and ");
@@ -2350,7 +2377,7 @@ export class TelegramBot {
         : "";
       return {
         reply: [
-          `No connected browser account for ${missing}, so the pipeline ran as packets, not as browser jobs.`,
+          `No connected browser account for ${missing}, so the pipeline ran as packets, not as browser jobs.${cloudNote}`,
           `Plan packet: ${planPacket.filePath}`,
           `Audit packet: ${auditPacket.filePath}`,
           `Next step: run the plan packet in ${planModel}, paste the result back, then run the audit packet in ${auditModel}.${deployNote}`,

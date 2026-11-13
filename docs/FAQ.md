@@ -167,13 +167,20 @@ never makes a paid API call while the cap is 0.
 
 ## 16. Which models work in browser mode, and which are packet-only?
 
-Browser mode is wired only for ChatGPT and Claude. The driver has
-selectors verified live for those two. Gemini, Grok, DeepSeek,
-Perplexity, Meta AI, Copilot, and Mistral are packet-only. `run-browser`
-refuses them with a clear message telling you to use packet mode. Do not
-claim a live browser connection for a packet-only model. Wiring a new
-driver needs the same path as V1.2: live login check, live selector
-verification, and one small first live test. See `V1-5-MODELS.md`.
+Browser mode has two kinds of accounts since V2.3. A profile account
+uses the Playwright driver, which is wired only for ChatGPT and
+Claude: the driver has selectors verified live for those two. A cloud
+account uses the cloud browser, where you are already logged in, and
+any subscription model can be a cloud account, including Gemini, Grok,
+DeepSeek, Perplexity, Meta AI, Copilot, and Mistral. `run-browser`
+refuses a cloud account from the CLI: cloud jobs run from Muse
+through the cloud browser, never from the CLI. A model with no
+connected account anywhere is packet-only: `run-browser` refuses it
+with a clear message telling you to use packet mode. Do not claim a
+live browser connection for a packet-only model. Wiring a new driver
+needs the same path as V1.2: live login check, live selector
+verification, and one small first live test. See `V1-5-MODELS.md` and
+`V2-3-CLOUD-BROWSER.md`.
 
 ## 17. Has a live prompt been sent through the driver yet?
 
@@ -337,3 +344,23 @@ created after the V2.2 build; until then, chat messages queue and
 wait. Check the relay with `telegram-relay-status`, `telegram-inbox`,
 and `telegram-outbox`. See `V2-2-TELEGRAM-MUSE-CHANNEL.md` and
 `scripts/telegram-relay.md`.
+
+## 29. What is a cloud browser account, and why did the relay ask me to copy and paste?
+
+A cloud browser account is a model you are already logged in to in
+the cloud browser (Muse's browser, default profile), not in a harness
+Playwright profile. The two logins do not carry over to each other:
+being logged in to ChatGPT in the cloud browser does not log the
+harness profile in, and the harness profile login does not log the
+cloud browser in. Before V2.3 the harness only knew about profile
+accounts, so when its browser was empty it fell back to packet mode
+and asked you to copy and paste, even though you were already logged
+in. That was the bug. Since V2.3, record the cloud login with
+`account-add --provider <model> --id <id> --label "<Label>" --source cloud`,
+verify it with
+`browser-connect --account <id> --verified-via <browser task id> --verified-note "<what the browser task observed>"`,
+and the relay runs the job itself through the cloud browser instead
+of asking you. `run-browser` still refuses a cloud account from the
+CLI: cloud jobs run from Muse, never from the CLI. Packet mode is now
+the last resort, for a model with no connected account anywhere. See
+`V2-3-CLOUD-BROWSER.md`.

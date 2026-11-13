@@ -250,17 +250,28 @@ field anywhere. At most 3 accounts per install by default. See
 ### account-add
 
 ```bash
-node dist/index.js account-add --provider <chatgpt|claude> --id <id> --label "<Label>" [--tenant <id>]
+node dist/index.js account-add --provider <model> --id <id> --label "<Label>" [--source cloud] [--tenant <id>]
 ```
 
-Adds a browser account. The provider must be `chatgpt` or `claude`. The
-profile folder is `profiles/<tenantId>/<provider>-<id>/`, for example
+Adds a browser account. The source defaults to `profile`: the provider
+must be `chatgpt` or `claude`, and the profile folder is
+`profiles/<tenantId>/<provider>-<id>/`, for example
 `profiles/jane-doe/chatgpt-main`.
+
+With `--source cloud`, the account is a model you are already logged in
+to in the cloud browser, not in a harness profile. Any subscription
+model is allowed, including gemini, and the account has no local
+profile folder. A cloud account is verified by a browser task, never
+by the driver; see `browser-connect` below.
 
 Example:
 
 ```bash
 node dist/index.js account-add --provider chatgpt --id main --label "Main ChatGPT"
+```
+
+```bash
+node dist/index.js account-add --provider gemini --id gem --label "Gemini Cloud" --source cloud
 ```
 
 The account starts disconnected. Log in by hand in that profile, then
@@ -292,14 +303,25 @@ on or off, and one connection line per account.
 
 ```bash
 node dist/index.js browser-connect --account <id> [--tenant <id>]
+node dist/index.js browser-connect --account <id> --verified-via <browser task id> --verified-note "<observation>" [--tenant <id>]
 ```
 
 Verifies the login for one browser account, and only then marks it
-connected. The driver opens the account profile, loads the provider page,
-and checks that the prompt box and the logged in profile marker are
-there. If the driver reports not logged in, a login page, or a challenge,
-the account stays disconnected and the exact reason is recorded.
-Connected is a verified fact, never a claim.
+connected. For a profile account, the driver opens the account
+profile, loads the provider page, and checks that the prompt box and
+the logged in profile marker are there. If the driver reports not
+logged in, a login page, or a challenge, the account stays disconnected
+and the exact reason is recorded. Connected is a verified fact, never
+a claim.
+
+For a cloud account, the driver is never used. The login is verified
+by a browser task that checked it in the cloud browser, and both
+evidence flags are required: `--verified-via` is the browser task id
+that did the check, and `--verified-note` is the plain-words
+observation of what it saw, for example "chatgpt.com shows the prompt
+box and the business mail account, Free plan". The evidence is stored
+on the account and in the audit log. Without both flags, a cloud
+connect is refused. The flags are refused for a profile account.
 
 Browser-connect never types a password, never stores a login detail, and
 never auto solves a challenge. It is refused while HOLD is on. It works
@@ -310,6 +332,10 @@ Example:
 
 ```bash
 node dist/index.js browser-connect --account main
+```
+
+```bash
+node dist/index.js browser-connect --account gem --verified-via browser-task:abc123 --verified-note "gemini.google.com shows the prompt box and the business mail account"
 ```
 
 For tests only, `TRUSTYMUSE_BROWSER_MOCK=1` selects the mock driver
@@ -437,7 +463,11 @@ node dist/index.js run-browser --model chatgpt --account main --type seo --title
 Run-browser refuses, in this order, with a clear message and a blocked
 audit event:
 
-- A packet-only model, such as gemini, with
+- A cloud account, with `browser_blocked_cloud`. A cloud browser job
+  never runs from the CLI: it runs from Muse, through the cloud
+  browser, and the relay or the Muse app chat runs it and audit-logs
+  it with `cloud-job-log`. No packet is created.
+- A packet-only model, such as gemini with no connected account, with
   `browser_blocked_packet_only`. Use packet mode for that model.
 - A missing `--account`.
 - Browser mode off, with `browser_blocked_disabled`. Set
@@ -448,7 +478,8 @@ audit event:
 - An unknown account, or an account whose provider does not match the
   model.
 - A disconnected account, with `browser_blocked_not_connected`. Run
-  `browser-connect --account <id>` first.
+  `browser-connect --account <id>` first. For a cloud account, the
+  connect needs `--verified-via` and `--verified-note`.
 
 If a job pauses the account, because of a challenge or driver errors,
 the account is marked disconnected again, and it needs a fresh
@@ -458,6 +489,21 @@ the account is marked disconnected again, and it needs a fresh
 No live prompt has been sent through the Playwright driver yet. The
 first live job is still untested, so keep it small, keep it to one
 account, and keep packet mode ready as the fallback.
+
+### cloud-job-log
+
+```bash
+node dist/index.js cloud-job-log --account <id> --model <model> --task "<short task>" --result ok|failed [--type <type>] [--detail "..."] [--tenant <id>]
+```
+
+Records one cloud browser job in the audit log. The job itself runs
+from Muse through the cloud browser, never from the CLI: this command
+only records that it ran, with the account, the model, a short task
+description, and the result. The relay calls it after every cloud job.
+It refuses an unknown account, a profile account, a disconnected
+account, a provider mismatch, and a bad result value, and it refuses
+while HOLD is on. The account use count goes up by one, the same as a
+profile browser job.
 
 ### check-api
 

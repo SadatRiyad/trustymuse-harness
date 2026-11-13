@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { stateDir } from "../audit";
+import { getSubscriptionModel } from "../registry";
 
 // Account registry for Browser Session Mode, V1.1.
 // One account is one logged in normal ChatGPT or Claude account, used through
@@ -8,15 +9,47 @@ import { stateDir } from "../audit";
 // stores a token. There is no password field and no token field on this type
 // on purpose. Login is done once by the user, in their own browser, in that
 // profile. The harness only opens the already logged in profile.
+//
+// V2.3 adds a second account source, "cloud". A cloud account is a model
+// the user is already logged in to in the cloud browser (Muse's browser,
+// default profile), not in a harness Playwright profile. The cloud browser
+// login does not carry over to a harness profile, and the harness profile
+// login does not carry over to the cloud browser: they are two separate
+// logins, and the source field says which one the account uses. A cloud
+// account has no local profile dir, and its login is verified by a browser
+// task that checks the cloud browser, never by the driver. The driver only
+// ever opens profile accounts. A cloud job never runs from the CLI: it
+// runs from Muse, through the cloud browser, and is audit-logged with
+// cloud-job-log. Packet mode is the last resort, for a model with no
+// connected account anywhere.
 
 export type BrowserProvider = "chatgpt" | "claude";
+export type AccountSource = "profile" | "cloud";
+// Every subscription model id may be a cloud account, because the cloud
+// browser can reach any chat app the user is logged in to. A profile
+// account is still chatgpt or claude only, because the Playwright driver
+// is wired only for those two.
+export type AccountProvider =
+  | "chatgpt"
+  | "claude"
+  | "gemini"
+  | "grok"
+  | "deepseek"
+  | "perplexity"
+  | "meta-ai"
+  | "copilot"
+  | "mistral";
 export type AccountStatus = "active" | "paused" | "challenge" | "disabled";
 
 export interface BrowserAccount {
   id: string;
-  provider: BrowserProvider;
+  provider: AccountProvider;
   label: string;
   profileDir: string;
+  // Account source, V2.3. "profile" is the existing Playwright
+  // persistent-context account. "cloud" is the cloud browser account.
+  // Old records without this field are treated as "profile".
+  source: AccountSource;
   status: AccountStatus;
   lastUsed: string | null;
   dailyCount: number;
@@ -32,6 +65,15 @@ export interface BrowserAccount {
   browserConnectedAt: string | null;
   browserLastVerified: string | null;
   browserDisconnectReason: string | null;
+  // Cloud verification, V2.3. Set only by a cloud connect, from the
+  // evidence a browser task observed in the cloud browser. verifiedVia
+  // is the browser task id that checked the login. verifiedNote is the
+  // plain-words observation, for example "chatgpt.com shows the prompt
+  // box and the business mail account, Free plan". No login detail is
+  // ever stored here: no password, no token, no cookie, no session.
+  verifiedAt: string | null;
+  verifiedVia: string | null;
+  verifiedNote: string | null;
 }
 
 export function accountsFilePath(rootDir?: string, tenantId?: string): string {
@@ -102,6 +144,21 @@ export function loadAccounts(rootDir?: string, tenantId?: string): BrowserAccoun
       if (typeof account.browserDisconnectReason !== "string") {
         account.browserDisconnectReason = null;
       }
+      // Backfill the V2.3 source field on records written before V2.3.
+      // Every old record was a profile account, so it stays "profile".
+      // Cloud verification fields start empty.
+      if (account.source !== "profile" && account.source !== "cloud") {
+        account.source = "profile";
+      }
+      if (typeof account.verifiedAt !== "string") {
+        account.verifiedAt = null;
+      }
+      if (typeof account.verifiedVia !== "string") {
+        account.verifiedVia = null;
+      }
+      if (typeof account.verifiedNote !== "string") {
+        account.verifiedNote = null;
+      }
     }
     return accounts;
   } catch (error) {
@@ -127,13 +184,29 @@ export function profileDirFor(provider: BrowserProvider, id: string, profileRoot
 }
 
 export function addAccount(
-  input: { provider: string; id: string; label: string },
+  input: { provider: string; id: string; label: string; source?: string },
   options: { rootDir?: string; profileRoot?: string; maxAccounts?: number; tenantId?: string } = {},
 ): BrowserAccount {
   const maxAccounts = options.maxAccounts ?? 3;
   const profileRoot = tenantProfileRoot(options.profileRoot ?? "./profiles", options.tenantId);
-  if (!isValidProvider(input.provider)) {
-    throw new Error("Provider must be chatgpt or claude.");
+  // Source defaults to "profile", so nothing existing changes meaning.
+  const source = input.source === undefined || input.source === "" ? "profile" : input.source;
+  if (source !== "profile" && source !== "cloud") {
+    throw new Error("Account source must be profile or cloud.");
+  }
+  if (source === "profile") {
+    // A profile account needs a wired driver, so only chatgpt and
+    // claude are allowed here.
+    if (!isValidProvider(input.provider)) {
+      throw new Error("Provider must be chatgpt or claude for a profile account. A cloud account can use any subscription model.");
+    }
+  } else {
+    // A cloud account runs through the cloud browser, which can reach
+    // any chat app the user is logged in to, so any subscription model
+    // is allowed. API models are never allowed: they have no chat app.
+    if (!getSubscriptionModel(input.provider)) {
+      throw new Error("Provider must be a known subscription model for a cloud account: chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral.");
+    }
   }
   if (!isValidId(input.id)) {
     throw new Error("Account id must be lowercase letters, digits, or short hyphens, for example main or work-1.");
@@ -151,9 +224,12 @@ export function addAccount(
   }
   const account: BrowserAccount = {
     id: input.id,
-    provider: input.provider,
+    provider: input.provider as AccountProvider,
     label,
-    profileDir: profileDirFor(input.provider, input.id, profileRoot),
+    // A cloud account has no local profile: the login lives in the
+    // cloud browser, not in a harness profile dir.
+    profileDir: source === "cloud" ? "" : profileDirFor(input.provider as BrowserProvider, input.id, profileRoot),
+    source,
     status: "active",
     lastUsed: null,
     dailyCount: 0,
@@ -164,6 +240,9 @@ export function addAccount(
     browserConnectedAt: null,
     browserLastVerified: null,
     browserDisconnectReason: null,
+    verifiedAt: null,
+    verifiedVia: null,
+    verifiedNote: null,
   };
   assertNoSecrets(account);
   accounts.push(account);

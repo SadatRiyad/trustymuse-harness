@@ -1,6 +1,17 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V2.2 local only, multi-tenant, public repo. Version 2.2.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.1 code with the panel Start button, and the owner is allowlisted.
+Date: 2026-11-14. Status: V2.3 local only, multi-tenant, public repo. Version 2.3.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.2 code with the panel Start button, and the owner is allowlisted.
+
+## What V2.3 adds: Cloud Browser Mode
+
+- An account record gains a source field: `profile` (the existing Playwright profile account, chatgpt or claude only) or `cloud` (a model the user is already logged in to in the cloud browser, any subscription model, no local profile). The cloud browser login does not carry over to a harness profile, and the harness profile login does not carry over to the cloud browser. Old records without a source field are treated as profile accounts.
+- `account-add --source cloud` records a cloud account. `browser-connect --account <id> --verified-via <browser task id> --verified-note "<what the browser task observed>"` connects it, storing verifiedAt, verifiedVia, and verifiedNote on the account and in the audit log. Without both flags, a cloud connect is refused. `browser-disconnect` works for cloud accounts exactly as for profile accounts.
+- `run-browser` on a cloud account refuses from the CLI with a clear message: the job runs from Muse, through the cloud browser, never from the CLI, and no packet is created. The Telegram `/run` command refuses a cloud account the same way, and the `/do` pipeline only picks profile accounts for its driver jobs.
+- New CLI: `cloud-job-log --account <id> --model <model> --task "<short task>" --result ok|failed` records one cloud browser job in the audit log. The relay calls it after every cloud job.
+- The relay contract in `scripts/telegram-relay.md` gains a Cloud browser section: when a step needs a browser job, the relay checks for a connected cloud account first and runs the job itself through the cloud browser, never asking the user to copy and paste. Packet mode is now the last resort, for a model with no connected account anywhere. A waiting packet job switches to the cloud path as soon as a cloud account for that model becomes connected.
+- `account-list`, `session-status`, `browser-status`, and `status` all show the source and, for a cloud account, the verification note.
+- New tests in `tests/run-connection-tests.mjs`, 15 groups, temp dirs only, mock driver only, no live network, no real token. `npm test` now runs 182 groups.
+- Still not done: no cloud accounts recorded yet on the real install (the parent records them after the browser verification tasks), no live browser job through the cloud path yet, the daily food plan job still waits for the cloud path, no panel change in this build, no webhook mode, no deploy from Telegram.
 
 ## What V2.2 adds: Telegram as a Muse Channel
 

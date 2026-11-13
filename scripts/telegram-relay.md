@@ -96,16 +96,16 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
 - If the request is vague, ask one short clarifying question instead
   of building the wrong thing. If the request has one clear meaning,
   build it.
-- If a step needs a packet-only model (gemini, grok, deepseek,
-  perplexity, meta-ai, copilot, mistral), create the packet and send
-  it to the user in Telegram with clear instructions: "Run this
-  packet in Gemini and paste the answer back here." The job then
-  waits. When the user pastes the answer, pick the job up and go on.
-  A waiting job survives a relay restart.
-- If a step needs a browser job, it needs a connected browser account
-  for that model. If the account is not connected, do not try to log
-  in. Tell the user what is missing and offer the packet path
-  instead.
+- If a step needs a model with no connected account anywhere, create
+  the packet and send it to the user in Telegram with clear
+  instructions: "Run this packet in Gemini and paste the answer back
+  here." The job then waits. When the user pastes the answer, pick the
+  job up and go on. A waiting job survives a relay restart. Packet
+  mode is the last resort, for a model with no connected account
+  anywhere, not the default. Never ask the user to copy and paste when
+  a connected account exists for that model.
+- If a step needs a browser job, check the accounts first, in this
+  order. See the Cloud browser section below for the full rule.
 - A multi-model fix loop is capped at 2 revisions. After that, stop,
   report the disagreement, and ask the user what to do. Never loop a
   third time.
@@ -117,6 +117,54 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
 - If the user never answers a waiting job, send one reminder after
   one day, then stop nagging. If the user says cancel, mark the job
   cancelled and say so.
+
+## Cloud browser
+
+There are two kinds of browser accounts, and they are not the same
+login. A profile account uses a harness Playwright profile on this
+machine: the user logged in once by hand in that profile, and the
+harness driver opens it. A cloud account uses the cloud browser
+(Muse's browser, default profile), where the user is already logged
+in. A cloud browser login does not carry over to a harness profile,
+and a harness profile login does not carry over to the cloud browser.
+The source field on the account says which one it is. Never confuse
+them, and never claim a login exists in one place because it exists
+in the other.
+
+When a step needs a browser job, check the accounts first, in this
+order:
+
+1. Run `node dist/index.js browser-status` and look for a connected
+   account for that model. The line says the source and, for a cloud
+   account, the verification note.
+2. If a connected cloud account exists for the model, run the job
+   yourself through the cloud browser. You are Muse, in a scheduled
+   job, with the same browser the user is already logged in to: open
+   the model chat app, send the prompt, read the reply, and use it.
+   Then audit-log the job with
+   `node dist/index.js cloud-job-log --account <id> --model <model> --task "<short task>" --result ok|failed`.
+   Never ask the user to copy and paste when a cloud account exists.
+   The whole point of the harness is that you do it, not the user.
+3. If a connected profile account exists for the model instead, run
+   the job with `run-browser` through the CLI, the same as before.
+4. If no connected account exists anywhere for the model, use packet
+   mode, and only then. Tell the user what is missing: which model,
+   and that no account is connected for it. Do not try to log in.
+   Never type a password, never enter a one-time code, never solve a
+   CAPTCHA.
+
+A waiting packet job switches to the cloud path as soon as a cloud
+account for that model becomes connected. When that happens, pick the
+job up, run it through the cloud browser, and tell the user the paste
+is no longer needed. Do not keep waiting for a paste that is no
+longer needed.
+
+The daily food plan job is the first example: a ChatGPT packet was
+already sent and is waiting for the user to paste the answer back.
+As soon as a ChatGPT cloud account is connected, run that plan
+through the cloud browser instead, then run the Gemini check the
+same way when a Gemini cloud account is connected, and set the final
+plan in the tracker. Tell the user the paste is no longer needed.
 
 ## Safety rules, in order
 
