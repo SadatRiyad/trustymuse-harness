@@ -1,6 +1,14 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V2.0 local only, multi-tenant, public repo. Version 2.0.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet, no live Telegram bot run yet.
+Date: 2026-11-14. Status: V2.1 local only, multi-tenant, public repo. Version 2.1.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, started by hand before V2.1.
+
+## What V2.1 adds: The Bot Starts From the Dashboard
+
+- `telegram-start` is supervisor-managed: it starts the bot in the background through `scripts/telegram-bot-supervisor.sh`, and the panel Start button runs the same supervisor. The supervisor adopts a bot that is already running into `state/telegram-bot.pid` instead of starting a duplicate. New CLI: `telegram-stop` (stops the bot through the supervisor), `telegram-status` (running or stopped, pid, token source, allowlist count, heartbeat last poll time, never the token value), and `telegram-run` (the foreground runner the supervisor starts, not for hand use).
+- Heartbeat: the bot writes `state/telegram-heartbeat.json` on every poll (lastPollAt, running, pid, tenantId, tokenSource, allowlistCount, lastError), so the panel can show RUNNING or STOPPED honestly. Both new files are gitignored.
+- Poll loop fix for the live HTTP 409: the poll timeout is 25 seconds with a 30-second abort margin (was 30 seconds with a 10-second margin), `pollOnce` never starts a second `getUpdates` while one is in flight, and a 409 backs off for 15 seconds instead of 5. A zombie process counts as dead in the supervisor and in `isProcessAlive`, so a stop never waits on a bot that is already dead.
+- New tests in `tests/run-telegram-tests.mjs`, 15 groups, temp dirs only, mock Telegram API only, never api.telegram.org, no real token. `npm test` now runs 152 groups.
+- Still not done: no panel Start button yet (the supervisor contract is defined in `docs/V2-1-BOT-START-FROM-PANEL.md`, the panel change comes next), the running bot predates V2.1 and needs a restart to pick up the heartbeat and the poll fix, no webhook mode, no deploy from Telegram.
 
 ## What V2.0 adds: Telegram Full Control
 

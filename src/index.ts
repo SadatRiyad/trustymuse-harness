@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
+import { spawnSync } from "node:child_process";
 import { loadConfig, saveConfig } from "./config";
 import { BudgetTracker } from "./budget";
 import { appendAudit, newRunId, readAuditEvents } from "./audit";
@@ -65,13 +66,18 @@ import {
   clearTelegramFileToken,
   createTelegramBot,
   denyTelegramUser,
+  getTelegramBotStatus,
   getTelegramTokenSource,
   loadAllowlist,
   requireTelegramToken,
   TelegramHttpApi,
 } from "./telegram/bot";
 
-// TrustyMUSE Harness V2.0 CLI. Local only, multi-tenant.
+// TrustyMUSE Harness V2.1 CLI. Local only, multi-tenant.
+// V2.1 starts the Telegram bot from the dashboard, not the terminal:
+// telegram-start is supervisor-managed, the bot writes a heartbeat on
+// every poll, and the poll loop never overlaps getUpdates (see
+// docs/V2-1-BOT-START-FROM-PANEL.md).
 // V2.0 adds full Telegram control (see docs/V2-0-TELEGRAM-FULL-CONTROL.md).
 // The bot answers read-only commands for allowlisted users, runs the
 // write commands the harness offers, runs one browser job at a time on
@@ -190,11 +196,13 @@ function printHelp(): void {
   console.log("  node dist/index.js telegram-token-status");
   console.log("  node dist/index.js telegram-token-clear");
   console.log("  node dist/index.js telegram-start [--tenant <id>]");
+  console.log("  node dist/index.js telegram-stop");
+  console.log("  node dist/index.js telegram-status");
   console.log("");
   console.log("Modes: subscription is on by default. API is off by default and blocked when budget cap is 0.");
   console.log("Models: 9 subscription models (chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral). Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude; the rest are packet-only.");
   console.log("Analytics: Phase 1 is a dry-run preview only. analytics-preview prints the exact payload that would be sent and sends nothing. The central service is not built yet, so analytics-enable is refused until Phase 2.");
-  console.log("Telegram: full control from Telegram with telegram-start. The token comes from TELEGRAM_BOT_TOKEN first, then from the file token in state/telegram.json, which the TrustyHarness panel box will write. Only allowlisted user ids get a reply. /run runs one browser job on a connected account, /do takes plain words. Nothing here ever deploys. See docs/V2-0-TELEGRAM-FULL-CONTROL.md.");
+  console.log("Telegram: full control from Telegram with telegram-start. The token comes from TELEGRAM_BOT_TOKEN first, then from the file token in state/telegram.json, which the TrustyHarness panel box writes. telegram-start is supervisor-managed: it starts the bot in the background through scripts/telegram-bot-supervisor.sh, adopts a bot that is already running instead of starting a duplicate, and the panel Start button uses the same supervisor. telegram-stop stops it, telegram-status reports running or stopped with the heartbeat last poll time. Only allowlisted user ids get a reply. /run runs one browser job on a connected account, /do takes plain words. Nothing here ever deploys. See docs/V2-1-BOT-START-FROM-PANEL.md.");
   console.log("Browser mode is off by default. Read docs/V1-1-BROWSER-MODE.md before you turn it on.");
   console.log("Projects: connect any running or new project with project-add. Jobs scoped with --project are draft only.");
   console.log("Tenants: one tenant is one Muse account. Tenant is resolved from --tenant, then TRUSTYMUSE_TENANT, then tenants.default in config.yaml, then \"default\".");
@@ -482,7 +490,7 @@ async function main(): Promise<void> {
     console.log("  5. Read your numeric Telegram user id from the terminal where the bot runs. The bot prints it when an unknown user tries /start. It is also in the audit log as a telegram_unauthorized event.");
     console.log("  6. Allowlist yourself: node dist/index.js telegram-allow --user-id <id> --label \"<Your name>\"");
     console.log("  7. Send /start to the bot again. Now it replies. Send /help for the command list.");
-    console.log("Check the token any time with telegram-token-status. It prints only set or not set, never the token. Remove the file token with telegram-token-clear. Stop the bot any time with Ctrl+C, and remove a user any time with telegram-deny.");
+    console.log("Check the token any time with telegram-token-status. It prints only set or not set, never the token. Remove the file token with telegram-token-clear. Stop the bot any time with telegram-stop, and remove a user any time with telegram-deny.");
     return;
   }
 
@@ -508,6 +516,47 @@ async function main(): Promise<void> {
     } else {
       console.log("No Telegram file token was set. Nothing changed. The environment token, when set, is untouched.");
     }
+    return;
+  }
+
+  // telegram-stop and telegram-status are install-wide, like the other
+  // telegram registry commands, so they do not resolve a tenant first.
+  // telegram-stop kills only a telegram bot process, through the
+  // supervisor. telegram-status prints running or stopped, the pid,
+  // the token source, the allowlist count, and the heartbeat last poll
+  // time. The token value is never printed.
+  if (command === "telegram-stop") {
+    const script = path.join(rootDir, "scripts", "telegram-bot-supervisor.sh");
+    const result = spawnSync("bash", [script, "stop", rootDir], { stdio: "inherit" });
+    if (result.error) {
+      console.log(`Telegram bot was not stopped. The supervisor could not run: ${result.error.message}`);
+      return;
+    }
+    if (result.status !== 0) {
+      console.log("Telegram bot was not stopped. See the supervisor message above.");
+    }
+    return;
+  }
+
+  if (command === "telegram-status") {
+    const status = getTelegramBotStatus(rootDir);
+    const lines = [
+      `Telegram bot: ${status.running ? "RUNNING" : "STOPPED"}`,
+      `Pid: ${status.pid === null ? "none" : status.pid}${status.running && !status.supervised ? " (not supervised yet, run telegram-start to adopt it into the pid file)" : ""}`,
+      `Token: ${status.tokenSet ? `set (source: ${status.tokenSource})` : "not set"}`,
+      `Allowlisted users: ${status.allowlistCount}`,
+      `Last poll: ${status.heartbeat && status.heartbeat.lastPollAt ? status.heartbeat.lastPollAt : "never"}`,
+    ];
+    if (status.heartbeat && status.heartbeat.lastError) {
+      lines.push(`Last poll error: ${status.heartbeat.lastError}`);
+    }
+    if (!status.running && status.heartbeat && status.heartbeat.running) {
+      lines.push("Note: the last heartbeat says running, but no bot process is alive. The heartbeat is stale, from a bot that stopped without writing a final heartbeat.");
+    }
+    if (status.running && !status.heartbeat) {
+      lines.push("Note: no heartbeat file yet. The bot started before V2.1 or has not polled yet. Restart it with telegram-stop and telegram-start to enable the heartbeat.");
+    }
+    console.log(lines.join("\n"));
     return;
   }
 
@@ -1293,12 +1342,35 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Telegram bot, V2.0. Long polling only, no webhook. The token comes
-  // from TELEGRAM_BOT_TOKEN first, then from the file token in
+  // Telegram bot, V2.1. telegram-start is supervisor-managed: it
+  // starts the bot in the background through
+  // scripts/telegram-bot-supervisor.sh, so the TrustyHarness panel
+  // Start button uses the same supervisor and the same adopt rule. A
+  // bot that is already running is adopted into state/telegram-bot.pid
+  // instead of starting a duplicate. The foreground runner is
+  // telegram-run, used by the supervisor only. The token comes from
+  // TELEGRAM_BOT_TOKEN first, then from the file token in
   // state/telegram.json. The bot serves this one tenant, resolved like
   // any CLI command. Only allowlisted user ids get a reply. See
-  // docs/V2-0-TELEGRAM-FULL-CONTROL.md.
+  // docs/V2-1-BOT-START-FROM-PANEL.md.
   if (command === "telegram-start") {
+    const script = path.join(rootDir, "scripts", "telegram-bot-supervisor.sh");
+    const result = spawnSync("bash", [script, "start", rootDir, tenantId], { stdio: "inherit" });
+    if (result.error) {
+      console.log(`Telegram bot was not started. The supervisor could not run: ${result.error.message}`);
+      console.log("Start it by hand with: node dist/index.js telegram-run");
+      return;
+    }
+    if (result.status !== 0) {
+      console.log("Telegram bot was not started. See the supervisor message above.");
+    }
+    return;
+  }
+
+  // telegram-run: the foreground bot runner. The supervisor starts it
+  // in the background. Do not run it by hand unless the supervisor
+  // cannot run: telegram-start is the supported way to start the bot.
+  if (command === "telegram-run") {
     let token: string;
     try {
       token = requireTelegramToken(process.env, rootDir);
@@ -1308,10 +1380,10 @@ async function main(): Promise<void> {
     }
     const api = new TelegramHttpApi(token);
     const bot = createTelegramBot({ rootDir, ctx, config, api });
-    console.log("TrustyMUSE Harness V2.0 Telegram bot starting...");
+    console.log("TrustyMUSE Harness V2.1 Telegram bot starting...");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId}). Only allowlisted Telegram users get a reply.`);
     console.log("Link a user first with: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
-    console.log("Stop the bot with Ctrl+C. HOLD blocks every write from Telegram. /run runs one browser job on a connected account. Nothing here ever deploys.");
+    console.log("Stop the bot with telegram-stop. HOLD blocks every write from Telegram. /run runs one browser job on a connected account. Nothing here ever deploys.");
     await bot.run();
     return;
   }

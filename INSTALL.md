@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V2.0 runs 137 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 35.
+All test suites must pass before you use it. V2.1 runs 152 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 50.
 
 If Chromium is missing for browser mode, install it with:
 
@@ -84,7 +84,7 @@ for a password or an API key. Then:
 5. Check the audit log:
    `node dist/index.js audit`
 
-## Telegram full control (V2.0)
+## Telegram full control (V2.1)
 
 Control the whole harness from your phone with a Telegram Bot. Create the bot
 with @BotFather in Telegram, then set the token in the environment:
@@ -99,6 +99,15 @@ token in `state/telegram.json`. The environment token wins when both are set.
 Check it any time with `telegram-token-status`, which prints only set or not
 set, never the value. Remove the file token with `telegram-token-clear`.
 
+`telegram-start` is supervisor-managed: it starts the bot in the background
+through `scripts/telegram-bot-supervisor.sh`, and adopts a bot that is
+already running instead of starting a duplicate. The bot writes a
+heartbeat to `state/telegram-heartbeat.json` on every poll, so the panel
+can show RUNNING or STOPPED honestly. Stop the bot any time with
+`telegram-stop`, and check it with `telegram-status`, which prints
+running or stopped, the pid, the token source, the allowlist count, and
+the heartbeat last poll time, never the token value.
+
 Send `/start` to the bot, read your numeric Telegram user id from the
 terminal where the bot runs, and allowlist yourself:
 
@@ -111,7 +120,9 @@ models, projects, browser, analytics, and audit, create tasks and packets,
 add, remove, and pause projects, connect and disconnect models, turn HOLD on
 and off, run one browser job at a time on a connected account with `/run`,
 and give plain-language instructions with `/do`. The bot never deploys,
-publishes, merges, or sends anything. Stop it any time with Ctrl+C. See
+publishes, merges, or sends anything. Stop it any time with
+`telegram-stop`. See `docs/V2-1-BOT-START-FROM-PANEL.md` for the
+supervisor contract, the heartbeat, and the poll loop fix, and
 `docs/V2-0-TELEGRAM-FULL-CONTROL.md` for the full command list, the `/do`
 patterns, and the deploy gate.
 
@@ -196,8 +207,6 @@ instead.
   `docs/V1-6-BROWSER-CONNECT.md` and `docs/USER-GUIDE.md`.
 - No live prompt has been sent through the Playwright driver yet.
   The first live driver job is still untested.
-- No live Telegram bot run has happened yet. The bot has only been run
-  against a mock Telegram API in tests, because no real token exists.
-  See `docs/V1-9-TELEGRAM-BOT.md` for what is still not done.
+- A live Telegram bot is running on the owner's install, started by hand before V2.1. It runs the V2.0 code until it is restarted with `telegram-stop` and `telegram-start`, so it has no heartbeat file and no poll fix yet. See `docs/V2-1-BOT-START-FROM-PANEL.md` for what is still not done.
 - See `docs/V1-4-MULTI-TENANT.md` for what a future hosted team
   server would need and why it is not in V1.4.

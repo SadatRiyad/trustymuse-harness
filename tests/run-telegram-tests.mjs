@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -31,6 +31,17 @@ const {
   auditPassedByMarkers,
   tokenizeArgs,
   truncateForTelegram,
+  readTelegramHeartbeat,
+  writeTelegramHeartbeat,
+  readTelegramPid,
+  writeTelegramPid,
+  getTelegramBotStatus,
+  findTelegramBotPids,
+  isProcessAlive,
+  TELEGRAM_POLL_TIMEOUT_SECONDS,
+  TELEGRAM_POLL_ABORT_EXTRA_MS,
+  TELEGRAM_POLL_RETRY_MS,
+  TELEGRAM_POLL_CONFLICT_BACKOFF_MS,
 } = await import(path.join(distDir, "telegram", "bot.js"));
 const { loadConfig } = await import(path.join(distDir, "config.js"));
 const { appendAudit, readAuditEvents } = await import(path.join(distDir, "audit.js"));
@@ -464,6 +475,10 @@ fs.copyFileSync(path.join(rootDir, "package.json"), path.join(tmp, "package.json
   }
   fs.copyFileSync(path.join(rootDir, "package.json"), path.join(scratch, "package.json"));
   fs.symlinkSync(path.join(rootDir, "node_modules"), path.join(scratch, "node_modules"));
+  // telegram-start is supervisor-managed in V2.1, so the scratch copy
+  // needs the supervisor script too.
+  fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
+  fs.copyFileSync(path.join(rootDir, "scripts", "telegram-bot-supervisor.sh"), path.join(scratch, "scripts", "telegram-bot-supervisor.sh"));
   const env = { ...process.env };
   delete env.TELEGRAM_BOT_TOKEN;
   // A fresh install has no tenant registry yet, so set one up first, the
@@ -1006,6 +1021,509 @@ fs.copyFileSync(path.join(rootDir, "package.json"), path.join(tmp, "package.json
   assert.equal(truncateForTelegram("x".repeat(5000)).length, 4000 + "\n[Reply cut short: it was over the Telegram message limit.]".length);
   assert.equal(truncateForTelegram("short"), "short");
   ok("tokenizer and truncation helpers");
+}
+
+// V2.1 groups: heartbeat, poll loop fix, supervisor, telegram-status.
+
+const supervisorScript = path.join(rootDir, "scripts", "telegram-bot-supervisor.sh");
+
+// A minimal fake dist/index.js for supervisor tests. It answers
+// telegram-token-status from the state file and pretends to run the bot
+// on telegram-run, without ever touching the network.
+function writeStubDistAt(distDir) {
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(distDir, "index.js"),
+    `#!/usr/bin/env node
+const fs = require("fs");
+const path = require("path");
+const rootDir = path.resolve(__dirname, "..");
+const command = process.argv[2];
+if (command === "telegram-token-status") {
+  let set = false;
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(rootDir, "state", "telegram.json"), "utf-8"));
+    set = Boolean(state.botToken);
+  } catch { set = false; }
+  if (set) {
+    console.log("Telegram bot token: set (source: file). The value is never printed.");
+  } else {
+    console.log("Telegram bot token: not set. Set TELEGRAM_BOT_TOKEN in the environment, or save the token from the TrustyHarness panel box.");
+  }
+  process.exit(0);
+}
+if (command === "telegram-run") {
+  console.log("TrustyMUSE Harness V2.1 Telegram bot starting... (stub)");
+  setInterval(() => {}, 10000);
+  return;
+}
+console.log("stub: unknown command " + command);
+process.exit(1);
+`,
+    "utf-8",
+  );
+}
+
+function writeStubDist(scratch) {
+  writeStubDistAt(path.join(scratch, "dist"));
+}
+
+// A fake bot process with the exact argv shape of a real bot:
+// `node dist/index.js telegram-run`, run from the given root, which
+// holds the stub dist. The stub never touches the network. A node -e
+// process is not enough: the supervisor only counts a process whose
+// argv is exactly node plus dist/index.js plus telegram-run, so a
+// parent shell holding the same words in its command line is never
+// mistaken for the bot.
+function spawnFakeBot(root) {
+  return spawn("node", ["dist/index.js", "telegram-run"], {
+    cwd: root,
+    detached: true,
+    stdio: "ignore",
+  });
+}
+
+function isAlive(pid) {
+  // Same zombie rule as isProcessAlive in the harness: a zombie still
+  // answers kill(pid, 0) but is already dead, and the test process
+  // cannot reap it while it is blocked inside spawnSync.
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
+    const closeParen = stat.lastIndexOf(")");
+    const state = closeParen >= 0 ? stat.slice(closeParen + 2, closeParen + 3) : "";
+    if (state === "Z" || state === "X" || state === "x") {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runSupervisor(args) {
+  return spawnSync("bash", [supervisorScript, ...args], { encoding: "utf-8" });
+}
+
+// A scratch copy with the real built CLI, like group 16, plus the
+// supervisor script, so telegram-start and telegram-status run for real.
+function copyRealDist(scratch) {
+  fs.mkdirSync(scratch, { recursive: true });
+  fs.mkdirSync(path.join(scratch, "dist"), { recursive: true });
+  fs.copyFileSync(path.join(distDir, "index.js"), path.join(scratch, "dist", "index.js"));
+  for (const sub of fs.readdirSync(distDir)) {
+    const subPath = path.join(distDir, sub);
+    if (!fs.statSync(subPath).isDirectory()) {
+      continue;
+    }
+    fs.mkdirSync(path.join(scratch, "dist", sub), { recursive: true });
+    for (const file of fs.readdirSync(subPath)) {
+      fs.copyFileSync(path.join(subPath, file), path.join(scratch, "dist", sub, file));
+    }
+  }
+  for (const file of fs.readdirSync(distDir)) {
+    if (file.endsWith(".js") && file !== "index.js") {
+      fs.copyFileSync(path.join(distDir, file), path.join(scratch, "dist", file));
+    }
+  }
+  fs.copyFileSync(path.join(rootDir, "package.json"), path.join(scratch, "package.json"));
+  fs.symlinkSync(path.join(rootDir, "node_modules"), path.join(scratch, "node_modules"));
+  fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
+  fs.copyFileSync(path.join(rootDir, "scripts", "telegram-bot-supervisor.sh"), path.join(scratch, "scripts", "telegram-bot-supervisor.sh"));
+}
+
+// 36. Heartbeat written on a successful poll, with the right fields.
+{
+  const root = path.join(tmp, "heartbeat-ok");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  api.queue(makeUpdate(1, 111, "/status"));
+  const bot = makeBot(root, ctx, config, api);
+  await bot.pollOnce();
+  assert.equal(api.sent.length, 1);
+  const heartbeat = readTelegramHeartbeat(root);
+  assert.ok(heartbeat);
+  assert.equal(heartbeat.running, true);
+  assert.equal(heartbeat.pid, process.pid);
+  assert.equal(heartbeat.tenantId, "demo-tenant");
+  assert.equal(heartbeat.tokenSource, "none");
+  assert.equal(heartbeat.allowlistCount, 1);
+  assert.equal(heartbeat.lastError, null);
+  assert.equal(heartbeat.lastPollAt, new Date(fakeNow).toISOString());
+  ok("heartbeat written on a successful poll with the right fields");
+}
+
+// 37. Heartbeat records the last poll error.
+{
+  const root = path.join(tmp, "heartbeat-error");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const failingApi = {
+    async getUpdates() {
+      throw new Error("network down");
+    },
+    async sendMessage() {},
+  };
+  const bot = makeBot(root, ctx, config, failingApi);
+  await assert.rejects(bot.pollOnce(), /network down/);
+  const heartbeat = readTelegramHeartbeat(root);
+  assert.ok(heartbeat);
+  assert.equal(heartbeat.running, true);
+  assert.equal(heartbeat.lastError, "network down");
+  assert.equal(heartbeat.allowlistCount, 0);
+  ok("heartbeat records the last poll error");
+}
+
+// 38. Heartbeat says stopped after run() ends.
+{
+  const root = path.join(tmp, "heartbeat-stop");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  let polls = 0;
+  let bot;
+  const countingApi = {
+    async getUpdates() {
+      polls += 1;
+      if (polls >= 2) {
+        bot.stop();
+      }
+      return [];
+    },
+    async sendMessage() {},
+  };
+  bot = makeBot(root, ctx, config, countingApi, { sleep: async () => {} });
+  await bot.run();
+  assert.ok(polls >= 2);
+  const heartbeat = readTelegramHeartbeat(root);
+  assert.ok(heartbeat);
+  assert.equal(heartbeat.running, false);
+  ok("heartbeat says stopped after run() ends");
+}
+
+// 39. Concurrent pollOnce calls never overlap getUpdates.
+{
+  const root = path.join(tmp, "poll-overlap");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const slowApi = {
+    async getUpdates() {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      inFlight -= 1;
+      return [];
+    },
+    async sendMessage() {},
+  };
+  const bot = makeBot(root, ctx, config, slowApi);
+  await Promise.all([bot.pollOnce(), bot.pollOnce(), bot.pollOnce()]);
+  assert.equal(maxInFlight, 1);
+  ok("concurrent pollOnce calls never overlap getUpdates");
+}
+
+// 40. run() with a slow getUpdates never overlaps polls.
+{
+  const root = path.join(tmp, "poll-run-overlap");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let polls = 0;
+  let bot;
+  const slowApi = {
+    async getUpdates() {
+      polls += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      inFlight -= 1;
+      if (polls >= 3) {
+        bot.stop();
+      }
+      return [];
+    },
+    async sendMessage() {},
+  };
+  bot = makeBot(root, ctx, config, slowApi, { sleep: async () => {} });
+  await bot.run();
+  assert.ok(polls >= 3);
+  assert.equal(maxInFlight, 1);
+  ok("run() with a slow getUpdates never overlaps polls");
+}
+
+// 41. A 409 backs off 15 seconds, other poll failures back off 5 seconds.
+{
+  const root = path.join(tmp, "poll-backoff");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  assert.equal(TELEGRAM_POLL_CONFLICT_BACKOFF_MS, 15000);
+  assert.equal(TELEGRAM_POLL_RETRY_MS, 5000);
+  const delays409 = [];
+  let calls409 = 0;
+  let bot409;
+  const api409 = {
+    async getUpdates() {
+      calls409 += 1;
+      if (calls409 === 1) {
+        throw new Error("Telegram API call failed for getUpdates: HTTP 409.");
+      }
+      bot409.stop();
+      return [];
+    },
+    async sendMessage() {},
+  };
+  bot409 = makeBot(root, ctx, config, api409, { sleep: async (ms) => { delays409.push(ms); } });
+  await bot409.run();
+  assert.deepEqual(delays409, [15000]);
+  const delaysPlain = [];
+  let callsPlain = 0;
+  let botPlain;
+  const apiPlain = {
+    async getUpdates() {
+      callsPlain += 1;
+      if (callsPlain === 1) {
+        throw new Error("network down");
+      }
+      botPlain.stop();
+      return [];
+    },
+    async sendMessage() {},
+  };
+  botPlain = makeBot(root, ctx, config, apiPlain, { sleep: async (ms) => { delaysPlain.push(ms); } });
+  await botPlain.run();
+  assert.deepEqual(delaysPlain, [5000]);
+  ok("409 backs off 15 seconds, other poll failures back off 5 seconds");
+}
+
+// 42. Default poll timeout is 25 seconds with a 30 second abort margin.
+{
+  assert.equal(TELEGRAM_POLL_TIMEOUT_SECONDS, 25);
+  assert.equal(TELEGRAM_POLL_ABORT_EXTRA_MS, 30000);
+  assert.ok(TELEGRAM_POLL_TIMEOUT_SECONDS * 1000 + TELEGRAM_POLL_ABORT_EXTRA_MS > TELEGRAM_POLL_TIMEOUT_SECONDS * 1000 + 10000);
+  const root = path.join(tmp, "poll-timeout-arg");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  let seenTimeout = null;
+  const capturingApi = {
+    async getUpdates(offset, timeoutSeconds) {
+      seenTimeout = timeoutSeconds;
+      return [];
+    },
+    async sendMessage() {},
+  };
+  const bot = makeBot(root, ctx, config, capturingApi);
+  await bot.pollOnce();
+  assert.equal(seenTimeout, 25);
+  ok("default poll timeout is 25 seconds with a 30 second abort margin");
+}
+
+// 43. Supervisor start refuses with no token.
+{
+  const scratch = path.join(tmp, "supervisor-no-token");
+  fs.mkdirSync(scratch, { recursive: true });
+  writeStubDist(scratch);
+  const result = runSupervisor(["start", scratch]);
+  assert.notEqual(result.status, 0);
+  assert.ok(result.stdout.includes("No Telegram bot token found"));
+  assert.equal(fs.existsSync(path.join(scratch, "state", "telegram-bot.pid")), false);
+  ok("supervisor start refuses with no token");
+}
+
+// 44. Supervisor start adopts an already-running bot instead of duplicating it.
+{
+  const scratch = path.join(tmp, "supervisor-adopt");
+  fs.mkdirSync(scratch, { recursive: true });
+  writeStubDist(scratch);
+  const fake = spawnFakeBot(scratch);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(isAlive(fake.pid));
+    const result = runSupervisor(["start", scratch]);
+    assert.equal(result.status, 0);
+    assert.ok(result.stdout.includes("already running"));
+    assert.ok(result.stdout.includes("Adopted"));
+    assert.equal(readTelegramPid(scratch), fake.pid);
+    assert.ok(isAlive(fake.pid));
+    assert.deepEqual(findTelegramBotPids(scratch), [fake.pid]);
+  } finally {
+    try {
+      process.kill(fake.pid);
+    } catch {}
+  }
+  ok("supervisor start adopts an already-running bot instead of duplicating it");
+}
+
+// 45. Supervisor start launches the bot, and stop kills only that pid.
+{
+  const scratch = path.join(tmp, "supervisor-launch");
+  fs.mkdirSync(scratch, { recursive: true });
+  writeStubDist(scratch);
+  setTelegramFileToken(scratch, "file-token-for-test-1234567890");
+  const result = runSupervisor(["start", scratch]);
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.includes("started (pid"));
+  const pid = readTelegramPid(scratch);
+  assert.ok(pid !== null && isAlive(pid));
+  const log = fs.readFileSync(path.join(scratch, "logs", "telegram-bot.log"), "utf-8");
+  assert.ok(log.includes("Telegram bot starting... (stub)"));
+  const stop = runSupervisor(["stop", scratch]);
+  assert.equal(stop.status, 0);
+  assert.ok(stop.stdout.includes(`stopped (pid ${pid})`));
+  assert.equal(isAlive(pid), false);
+  assert.equal(fs.existsSync(path.join(scratch, "state", "telegram-bot.pid")), false);
+  ok("supervisor start launches the bot and stop kills only that pid");
+}
+
+// 46. Supervisor stop kills only the recorded bot pid.
+{
+  const scratch = path.join(tmp, "supervisor-stop-only");
+  fs.mkdirSync(scratch, { recursive: true });
+  writeStubDist(scratch);
+  const fake = spawnFakeBot(scratch);
+  const decoy = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    writeTelegramPid(scratch, fake.pid);
+    const result = runSupervisor(["stop", scratch]);
+    assert.equal(result.status, 0);
+    assert.ok(result.stdout.includes(`stopped (pid ${fake.pid})`));
+    assert.equal(isAlive(fake.pid), false);
+    assert.ok(isAlive(decoy.pid));
+    assert.equal(fs.existsSync(path.join(scratch, "state", "telegram-bot.pid")), false);
+  } finally {
+    try {
+      process.kill(fake.pid);
+    } catch {}
+    try {
+      process.kill(decoy.pid);
+    } catch {}
+  }
+  ok("supervisor stop kills only the recorded bot pid");
+}
+
+// 47. Supervisor stop with a stale pid file reports stopped and removes the file.
+{
+  const scratch = path.join(tmp, "supervisor-stale-pid");
+  fs.mkdirSync(scratch, { recursive: true });
+  writeStubDist(scratch);
+  const dead = spawn("sleep", ["0"]);
+  const deadPid = dead.pid;
+  await new Promise((resolve) => dead.on("exit", resolve));
+  assert.equal(isAlive(deadPid), false);
+  writeTelegramPid(scratch, deadPid);
+  const result = runSupervisor(["stop", scratch]);
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.includes("not running"));
+  assert.equal(fs.existsSync(path.join(scratch, "state", "telegram-bot.pid")), false);
+  ok("supervisor stop with a stale pid file reports stopped and removes the file");
+}
+
+// 48. telegram-status never prints a token.
+{
+  const scratch = path.join(tmp, "status-cli");
+  copyRealDist(scratch);
+  const env = { ...process.env };
+  delete env.TELEGRAM_BOT_TOKEN;
+  execFileSync("node", ["dist/index.js", "setup", "--id", "demo-tenant", "--name", "Demo Tenant"], { cwd: scratch, encoding: "utf-8", env });
+  setTelegramFileToken(scratch, "SECRET-FILE-TOKEN-98765");
+  const out = execFileSync("node", ["dist/index.js", "telegram-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(out.includes("STOPPED"));
+  assert.ok(out.includes("set (source: file)"));
+  assert.ok(out.includes("Allowlisted users: 0"));
+  assert.ok(out.includes("Last poll: never"));
+  assert.ok(!out.includes("SECRET-FILE-TOKEN-98765"));
+  // A live pid in the pid file reports RUNNING.
+  writeTelegramPid(scratch, process.pid);
+  const outRunning = execFileSync("node", ["dist/index.js", "telegram-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(outRunning.includes("RUNNING"));
+  assert.ok(outRunning.includes(`Pid: ${process.pid}`));
+  assert.ok(!outRunning.includes("SECRET-FILE-TOKEN-98765"));
+  ok("telegram-status never prints a token");
+}
+
+// 49. telegram-start adopts a running bot in a scratch copy.
+{
+  const scratch = path.join(tmp, "start-adopt-cli");
+  copyRealDist(scratch);
+  const env = { ...process.env };
+  delete env.TELEGRAM_BOT_TOKEN;
+  execFileSync("node", ["dist/index.js", "setup", "--id", "demo-tenant", "--name", "Demo Tenant"], { cwd: scratch, encoding: "utf-8", env });
+  setTelegramFileToken(scratch, "file-token-for-test-1234567890");
+  // The fake runs the stub dist at sub/dist/index.js, not the real
+  // dist: its argv still ends in dist/index.js, its working directory
+  // is the scratch root, and the stub never touches the network.
+  writeStubDistAt(path.join(scratch, "sub", "dist"));
+  const fake = spawn("node", ["sub/dist/index.js", "telegram-run"], {
+    cwd: scratch,
+    detached: true,
+    stdio: "ignore",
+  });
+  fake.unref();
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const out = execFileSync("node", ["dist/index.js", "telegram-start"], { cwd: scratch, encoding: "utf-8", env });
+    assert.ok(out.includes("already running"));
+    assert.ok(out.includes("Adopted"));
+    assert.equal(readTelegramPid(scratch), fake.pid);
+    assert.ok(isAlive(fake.pid));
+  } finally {
+    try {
+      process.kill(fake.pid);
+    } catch {}
+  }
+  ok("telegram-start adopts a running bot instead of starting a duplicate");
+}
+
+// 50. A parent shell holding the bot launch words is never mistaken
+// for the bot. This is the real 2026-11-14 case: the hand-started bot
+// (pid 23752) runs under a bash subshell (pid 23749) whose command
+// line contains the launch words, and the supervisor first adopted the
+// shell pid instead of the bot pid. The fix is the exact argv check.
+{
+  const scratch = path.join(tmp, "shell-not-bot");
+  writeStubDist(scratch);
+  setTelegramFileToken(scratch, "file-token-for-test-1234567890");
+  const shell = spawn("bash", ["-c", "sleep 60 # node dist/index.js telegram-run"], {
+    cwd: scratch,
+    detached: true,
+    stdio: "ignore",
+  });
+  shell.unref();
+  let startedPid = null;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const out = execFileSync("bash", [supervisorScript, "start", scratch, "demo-tenant"], { encoding: "utf-8" });
+    assert.ok(out.includes("started"), "supervisor must start a real bot, not adopt the shell: " + out);
+    startedPid = readTelegramPid(scratch);
+    assert.notEqual(startedPid, shell.pid, "the shell pid must not be adopted");
+    assert.ok(isAlive(startedPid));
+    assert.ok(isAlive(shell.pid));
+  } finally {
+    try {
+      process.kill(shell.pid);
+    } catch {}
+    if (startedPid !== null) {
+      try {
+        execFileSync("bash", [supervisorScript, "stop", scratch, "demo-tenant"], { encoding: "utf-8" });
+      } catch {}
+    }
+  }
+  ok("a parent shell holding the bot words is never mistaken for the bot");
 }
 
 console.log(`All ${passed} telegram test groups passed. Temp dir: ${tmp}`);

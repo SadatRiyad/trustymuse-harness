@@ -394,3 +394,25 @@ reading `V1-1-BROWSER-MODE.md`. Verify the login with
 `/browser_status`. For the pipeline, both models need a connected
 account: one for the plan model, one for the audit model. See
 `V2-0-TELEGRAM-FULL-CONTROL.md`.
+
+## 18. The token is saved, but the bot does not reply to /start
+
+Symptom: the token is saved in the TrustyHarness panel box, but the
+bot gives no reply to `/start` in Telegram.
+
+Cause: saving the token does not start the bot. Before V2.1 the panel
+only saved the token, and nothing started the bot process, so there
+was no long-poll loop to receive the message. A second cause is the
+allowlist: a non-allowlisted user gets no reply at all, by design.
+
+Fix: start the bot with `node dist/index.js telegram-start`, which is
+supervisor-managed in V2.1 and adopts a bot that is already running
+instead of starting a duplicate. Check it with
+`node dist/index.js telegram-status`: it prints RUNNING or STOPPED, the
+pid, the token source, the allowlist count, and the heartbeat last poll
+time. Then send `/start` again, read your numeric Telegram user id
+from the bot log (`logs/telegram-bot.log`), and allowlist it with
+`telegram-allow --user-id <id> --label "<Name>"`. If the log shows
+repeated `poll conflict (HTTP 409)`, the bot is on code older than
+V2.1: restart it with `telegram-stop` and `telegram-start` to pick up
+the poll fix. See `V2-1-BOT-START-FROM-PANEL.md`.

@@ -55,7 +55,7 @@ node dist/index.js packet --model chatgpt --type seo --title "First task" --task
   writes.
 - **Audit log.** Every packet, check, block, and result is written to an
   append only audit log, per tenant.
-- **Telegram full control.** A Telegram Bot runs everything the harness can do from your phone: projects, models, tasks, HOLD, one browser job at a time on a connected account with `/run`, and plain-language `/do` instructions into packets or a plan-then-audit pipeline. Only allowlisted Telegram user ids get a reply. The token comes from `TELEGRAM_BOT_TOKEN` first, then from the file token in `state/telegram.json`. Nothing here ever deploys. See `docs/V2-0-TELEGRAM-FULL-CONTROL.md`.
+- **Telegram full control.** A Telegram Bot runs everything the harness can do from your phone: projects, models, tasks, HOLD, one browser job at a time on a connected account with `/run`, and plain-language `/do` instructions into packets or a plan-then-audit pipeline. Only allowlisted Telegram user ids get a reply. The token comes from `TELEGRAM_BOT_TOKEN` first, then from the file token in `state/telegram.json`. V2.1 starts the bot from the dashboard, not the terminal: `telegram-start` is supervisor-managed, the bot writes a heartbeat on every poll, and the poll loop never overlaps `getUpdates`. Nothing here ever deploys. See `docs/V2-1-BOT-START-FROM-PANEL.md`.
 
 ## Safety rules
 
@@ -78,10 +78,7 @@ node dist/index.js packet --model chatgpt --type seo --title "First task" --task
   seven models are packet-only.
 - No live paid API call has ever been made. The API adapters are stubs,
   and the budget cap is 0 by default.
-- No live Telegram bot run has happened yet. The bot has only been run
-  against a mock Telegram API in tests, because no real token exists.
-  The bot cannot run a browser job, and it cannot send, publish, merge,
-  or deploy anything.
+- A live Telegram bot is running on the owner's install, started by hand before V2.1. It runs the V2.0 code until it is restarted with `telegram-stop` and `telegram-start`, so it has no heartbeat file and no poll fix yet. The bot cannot run a browser job from an unconnected account, and it cannot send, publish, merge, or deploy anything.
 - There is no public Muse account API and no central server. Each Muse
   account runs its own copy of the harness. One account cannot see or
   control another Muse account.
@@ -99,7 +96,7 @@ fails. Developers start with
 [`docs/README.md`](docs/README.md).
 
 - [`INSTALL.md`](INSTALL.md): install, setup, tenants, migration.
-- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V2.0 do, and
+- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V2.1 do, and
   what they do not do.
 - [`docs/V1-1-BROWSER-MODE.md`](docs/V1-1-BROWSER-MODE.md): browser
   session mode and the risk disclosure.
@@ -121,6 +118,9 @@ fails. Developers start with
 - [`docs/V2-0-TELEGRAM-FULL-CONTROL.md`](docs/V2-0-TELEGRAM-FULL-CONTROL.md):
   Telegram full control, `/run`, `/do`, the deploy gate, and the token
   fallback.
+- [`docs/V2-1-BOT-START-FROM-PANEL.md`](docs/V2-1-BOT-START-FROM-PANEL.md):
+  the bot starts from the dashboard, the supervisor contract, the
+  heartbeat, and the poll loop fix for HTTP 409.
 
 ## Quick start
 
@@ -132,8 +132,8 @@ node dist/index.js setup --id jane-doe --name "Jane Doe"
 node dist/index.js status
 ```
 
-`npm test` runs 137 test groups: V1 7, browser 10, live driver 9,
-projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 35. Do not use the
+`npm test` runs 152 test groups: V1 7, browser 10, live driver 9,
+projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 50. Do not use the
 harness until the tests pass.
 
 First packet job. Connect ChatGPT first, because a fresh tenant starts

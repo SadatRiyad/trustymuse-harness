@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs ten suites, 137 test groups in
+`npm test` builds the code, then runs ten suites, 152 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9, analytics 11, telegram 35. All suites use temp folders only, the mock driver, or
+15, connection 15, model-connect 9, analytics 11, telegram 50. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -359,7 +359,12 @@ fake pages. No suite makes a live network call. The suites are:
   command, /run_browser refused, analytics_preview prints the
   counts-only payload with no secret text, /audit returns the last 10
   events with no detail text, real CLI telegram-allow, telegram-allowlist,
-  telegram-link, and telegram-start refusal in a scratch copy.
+  telegram-link, and telegram-start refusal in a scratch copy. V2.0
+  adds the file token fallback, write commands, /run, /do, and HOLD
+  confirmation. V2.1 adds the heartbeat on every poll, the poll loop
+  never overlapping getUpdates, the 15-second 409 backoff, the
+  supervisor start, stop, adopt, and status, and telegram-status never
+  printing a token, all in temp dirs with a mock API only.
 
 ## Honest limits
 
@@ -393,9 +398,12 @@ every design choice.
   The bot runs the write commands the harness offers, runs one browser
   job at a time on a connected account with `/run`, and parses
   plain-language `/do` instructions into packets or a plan-then-audit
-  pipeline. It never deploys. HOLD blocks all Telegram writes. No live
-  bot run has happened yet, because no real token exists. See
-  `V2-0-TELEGRAM-FULL-CONTROL.md`.
+  pipeline. It never deploys. HOLD blocks all Telegram writes. V2.1
+  starts the bot through `scripts/telegram-bot-supervisor.sh`, which
+  `telegram-start` and the panel Start button share, and the bot writes
+  a heartbeat to `state/telegram-heartbeat.json` on every poll. A live
+  bot is running on the owner's install, started by hand before V2.1.
+  See `V2-1-BOT-START-FROM-PANEL.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a

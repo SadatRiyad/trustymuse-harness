@@ -38,6 +38,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { appendAudit, newRunId, readAuditEvents } from "../audit";
 import { BudgetTracker } from "../budget";
 import { loadConfig, saveConfig, HarnessConfig } from "../config";
@@ -83,6 +84,19 @@ export const TELEGRAM_MAX_COMMANDS_PER_MINUTE = 20;
 export const TELEGRAM_RATE_WINDOW_MS = 60 * 1000;
 export const TELEGRAM_MAX_MESSAGE_CHARS = 4000;
 export const TELEGRAM_API_BASE = "https://api.telegram.org";
+// Long-poll timing, V2.1. The server holds a getUpdates request for at
+// most the poll timeout. The client abort must be clearly longer than
+// that hold: the live bot showed repeated client TimeoutErrors followed
+// by HTTP 409, which means the client aborted while Telegram still
+// held the request and the retry overlapped it on Telegram's side.
+// Poll timeout 25 seconds, abort 30 seconds after that, so an abort
+// only ever fires on a genuine network stall.
+export const TELEGRAM_POLL_TIMEOUT_SECONDS = 25;
+export const TELEGRAM_POLL_ABORT_EXTRA_MS = 30 * 1000;
+export const TELEGRAM_POLL_RETRY_MS = 5000;
+// A 409 means another getUpdates request is still open on Telegram's
+// side. Back off longer instead of hammering the same short retry.
+export const TELEGRAM_POLL_CONFLICT_BACKOFF_MS = 15000;
 
 // The token comes from TELEGRAM_BOT_TOKEN first, then from the file
 // token in gitignored state/telegram.json, so the TrustyHarness panel
@@ -186,7 +200,11 @@ export class TelegramHttpApi implements TelegramApi {
     if (offset !== null) {
       body.offset = offset;
     }
-    const result = await this.call("getUpdates", body, (timeoutSeconds + 10) * 1000);
+    // The abort is 30 seconds past the server long-poll hold, so the
+    // client never aborts while Telegram still holds the request. An
+    // early abort plus a fast retry is what produced HTTP 409 overlaps
+    // on the live bot before V2.1.
+    const result = await this.call("getUpdates", body, timeoutSeconds * 1000 + TELEGRAM_POLL_ABORT_EXTRA_MS);
     if (!Array.isArray(result)) {
       throw new Error("Telegram API call failed for getUpdates: the result was not a list.");
     }
@@ -408,6 +426,225 @@ export function getTelegramAllowLabel(rootDir: string, userId: number): string |
 }
 
 // ---------------------------------------------------------------------------
+// Heartbeat, pid file, and bot status, V2.1. The bot writes
+// state/telegram-heartbeat.json on every poll, so the TrustyHarness
+// panel can show RUNNING or STOPPED honestly instead of guessing from
+// the token alone. The supervisor writes state/telegram-bot.pid. Both
+// files are gitignored through state/. Neither file ever holds the
+// token: the heartbeat holds only the token source, env or file.
+// ---------------------------------------------------------------------------
+
+export interface TelegramHeartbeat {
+  lastPollAt: string | null;
+  running: boolean;
+  pid: number;
+  tenantId: string;
+  tokenSource: "env" | "file" | "none";
+  allowlistCount: number;
+  lastError: string | null;
+}
+
+export function telegramHeartbeatPath(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-heartbeat.json");
+}
+
+export function telegramPidPath(rootDir: string): string {
+  return path.join(rootDir, "state", "telegram-bot.pid");
+}
+
+export function readTelegramHeartbeat(rootDir: string): TelegramHeartbeat | null {
+  const file = telegramHeartbeatPath(rootDir);
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    (typeof record.lastPollAt !== "string" && record.lastPollAt !== null) ||
+    typeof record.running !== "boolean" ||
+    typeof record.pid !== "number" ||
+    typeof record.tenantId !== "string" ||
+    typeof record.allowlistCount !== "number"
+  ) {
+    return null;
+  }
+  return {
+    lastPollAt: (record.lastPollAt as string | null) ?? null,
+    running: record.running,
+    pid: record.pid,
+    tenantId: record.tenantId,
+    tokenSource: record.tokenSource === "env" || record.tokenSource === "file" ? record.tokenSource : "none",
+    allowlistCount: record.allowlistCount,
+    lastError: typeof record.lastError === "string" ? record.lastError : null,
+  };
+}
+
+export function writeTelegramHeartbeat(rootDir: string, heartbeat: TelegramHeartbeat): void {
+  const dir = path.join(rootDir, "state");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(telegramHeartbeatPath(rootDir), JSON.stringify(heartbeat, null, 2) + "\n", "utf-8");
+}
+
+export function readTelegramPid(rootDir: string): number | null {
+  const file = telegramPidPath(rootDir);
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  const raw = fs.readFileSync(file, "utf-8").trim();
+  const pid = Number(raw);
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return null;
+  }
+  return pid;
+}
+
+export function writeTelegramPid(rootDir: string, pid: number): void {
+  const dir = path.join(rootDir, "state");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(telegramPidPath(rootDir), `${pid}\n`, "utf-8");
+}
+
+export function removeTelegramPid(rootDir: string): void {
+  const file = telegramPidPath(rootDir);
+  if (fs.existsSync(file)) {
+    fs.unlinkSync(file);
+  }
+}
+
+// True when the pid is alive right now. A zombie still answers
+// kill(pid, 0) but is already dead: its parent has not reaped it yet.
+// That happens exactly when the caller spawned the bot and is blocked
+// waiting for the supervisor, so the zombie stays unreaped for the
+// whole stop. The process state in /proc tells the truth: Z (zombie)
+// or X (dead) means not alive.
+export function isProcessAlive(pid: number): boolean {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
+    const closeParen = stat.lastIndexOf(")");
+    const state = closeParen >= 0 ? stat.slice(closeParen + 2, closeParen + 3) : "";
+    if (state === "Z" || state === "X" || state === "x") {
+      return false;
+    }
+  } catch {
+    // No /proc entry: the process is gone, or /proc is unavailable.
+    // Fall through to the kill check below.
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// True when the pid is a telegram bot process: its argv must be
+// exactly `node <path>/dist/index.js telegram-start|telegram-run`.
+// A substring match is not enough: a parent shell that launched the
+// bot holds the same words in its own command line, and pgrep would
+// match the shell too.
+export function isTelegramBotProcess(pid: number): boolean {
+  let cmdline: Buffer;
+  try {
+    cmdline = fs.readFileSync(`/proc/${pid}/cmdline`);
+  } catch {
+    return false;
+  }
+  const args = cmdline.toString("utf-8").split("\0").filter((part) => part.length > 0);
+  if (args.length < 3) {
+    return false;
+  }
+  const arg0 = args[0];
+  if (arg0 !== "node" && !arg0.endsWith("/node")) {
+    return false;
+  }
+  const arg1 = args[1];
+  if (arg1 !== "dist/index.js" && !arg1.endsWith("/dist/index.js")) {
+    return false;
+  }
+  return args[2] === "telegram-start" || args[2] === "telegram-run";
+}
+
+// Pids of running bot processes for one harness root, found by command
+// line and working directory. The working directory is the filter that
+// keeps one install from adopting another install's bot: a bot started
+// by the supervisor runs with its working directory equal to its
+// harness root. The current process and its parent are never returned,
+// so a CLI that asks for the status never mistakes itself for the bot.
+export function findTelegramBotPids(rootDir: string): number[] {
+  let out = "";
+  try {
+    out = execFileSync("pgrep", ["-f", "dist/index.js telegram-(start|run)"], { encoding: "utf-8" });
+  } catch {
+    return [];
+  }
+  const found: number[] = [];
+  for (const line of out.split("\n")) {
+    const pid = Number(line.trim());
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || pid === process.ppid) {
+      continue;
+    }
+    if (!isTelegramBotProcess(pid)) {
+      continue;
+    }
+    try {
+      const cwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+      if (path.resolve(cwd) !== path.resolve(rootDir)) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    found.push(pid);
+  }
+  return found;
+}
+
+// Bot status for telegram-status: running or stopped, pid, token source,
+// allowlist count, and the heartbeat last poll time. Never the token
+// value. Running is decided by a live process, never by the heartbeat
+// alone: a crashed bot leaves a stale running heartbeat behind.
+export interface TelegramBotStatus {
+  running: boolean;
+  supervised: boolean;
+  pid: number | null;
+  heartbeat: TelegramHeartbeat | null;
+  tokenSource: "env" | "file" | "none";
+  tokenSet: boolean;
+  allowlistCount: number;
+}
+
+export function getTelegramBotStatus(rootDir: string): TelegramBotStatus {
+  const heartbeat = readTelegramHeartbeat(rootDir);
+  const token = getTelegramTokenSource(rootDir);
+  let allowlistCount = 0;
+  try {
+    allowlistCount = loadAllowlist(rootDir).length;
+  } catch {
+    allowlistCount = 0;
+  }
+  const recordedPid = readTelegramPid(rootDir);
+  if (recordedPid !== null && isProcessAlive(recordedPid)) {
+    return { running: true, supervised: true, pid: recordedPid, heartbeat, tokenSource: token.source, tokenSet: token.set, allowlistCount };
+  }
+  // No live pid in the file: a bot started by hand is still a running
+  // bot. Find it by command line, so status stays honest until the
+  // supervisor adopts it into the pid file.
+  const found = findTelegramBotPids(rootDir);
+  if (found.length > 0) {
+    return { running: true, supervised: false, pid: found[0], heartbeat, tokenSource: token.source, tokenSet: token.set, allowlistCount };
+  }
+  return { running: false, supervised: false, pid: recordedPid, heartbeat, tokenSource: token.source, tokenSet: token.set, allowlistCount };
+}
+
+// ---------------------------------------------------------------------------
 // Message helpers. Telegram caps a message at 4096 characters, so every
 // reply is capped at 4000 with a note. User input is never echoed back
 // into an audit detail except as a single sanitized token, so a crafted
@@ -607,6 +844,10 @@ export interface TelegramBotOptions {
   // Test seam only. The workspace root for /project_add. The default is
   // the real workspace, ~/workspace, like project-add.
   workspaceRoot?: string;
+  // Test seam only. Sleeps between poll retries. Defaults to a real
+  // setTimeout sleep. Tests pass a fake that records the delay and
+  // resolves at once, so backoff timing is testable without waiting.
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface CommandOutcome {
@@ -639,6 +880,12 @@ export class TelegramBot {
   private now: () => number;
   private offset: number | null = null;
   private stopped = false;
+  // True while a getUpdates request is in flight. A second pollOnce
+  // call returns at once instead of starting a second request: the
+  // live bot overlapped requests after a client abort and Telegram
+  // answered with HTTP 409.
+  private pollInFlight = false;
+  private sleep: (ms: number) => Promise<void>;
   private commandTimes = new Map<number, number[]>();
   private unauthorizedLoggedAt = new Map<number, number>();
   private driverFactory: (account: BrowserAccount) => BrowserDriver;
@@ -654,8 +901,9 @@ export class TelegramBot {
     this.ctx = options.ctx;
     this.config = options.config;
     this.api = options.api;
-    this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
+    this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? TELEGRAM_POLL_TIMEOUT_SECONDS;
     this.now = options.now ?? (() => Date.now());
+    this.sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.driverFactory =
       options.driverFactory ||
       ((account: BrowserAccount) =>
@@ -681,14 +929,28 @@ export class TelegramBot {
   }
 
   async pollOnce(): Promise<void> {
-    const updates = await this.api.getUpdates(this.offset, this.pollTimeoutSeconds);
-    for (const update of updates) {
-      this.offset = update.update_id + 1;
-      try {
-        await this.handleUpdate(update);
-      } catch (error) {
-        console.log(`Telegram bot: one update failed and was skipped. ${String(error).replace(/^Error: /, "")}`);
+    // Never start a second getUpdates while one is still in flight. A
+    // concurrent call returns at once, it never starts a request.
+    if (this.pollInFlight) {
+      return;
+    }
+    this.pollInFlight = true;
+    try {
+      const updates = await this.api.getUpdates(this.offset, this.pollTimeoutSeconds);
+      for (const update of updates) {
+        this.offset = update.update_id + 1;
+        try {
+          await this.handleUpdate(update);
+        } catch (error) {
+          console.log(`Telegram bot: one update failed and was skipped. ${String(error).replace(/^Error: /, "")}`);
+        }
       }
+      this.writeHeartbeat(true, null);
+    } catch (error) {
+      this.writeHeartbeat(true, String(error).replace(/^Error: /, ""));
+      throw error;
+    } finally {
+      this.pollInFlight = false;
     }
   }
 
@@ -698,20 +960,59 @@ export class TelegramBot {
     };
     process.once("SIGINT", onSignal);
     process.once("SIGTERM", onSignal);
+    // The bot is running from the first poll. The heartbeat says so
+    // even before the first successful poll returns.
+    this.writeHeartbeat(true, null);
     try {
       while (!this.stopped) {
         try {
           await this.pollOnce();
         } catch (error) {
-          console.log(`Telegram bot: poll failed, retrying in 5 seconds. ${String(error).replace(/^Error: /, "")}`);
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          const message = String(error).replace(/^Error: /, "");
+          // HTTP 409 means another getUpdates request is still open on
+          // Telegram's side. Back off longer instead of hammering the
+          // same 5-second retry that caused the overlap.
+          const conflict = /HTTP 409/.test(message);
+          const delay = conflict ? TELEGRAM_POLL_CONFLICT_BACKOFF_MS : TELEGRAM_POLL_RETRY_MS;
+          console.log(
+            conflict
+              ? `Telegram bot: poll conflict (HTTP 409), another getUpdates is still open. Retrying in 15 seconds. ${message}`
+              : `Telegram bot: poll failed, retrying in 5 seconds. ${message}`,
+          );
+          await this.sleep(delay);
         }
       }
     } finally {
       process.removeListener("SIGINT", onSignal);
       process.removeListener("SIGTERM", onSignal);
+      this.writeHeartbeat(false, null);
     }
     console.log("Telegram bot stopped.");
+  }
+
+  // The heartbeat must never break polling. A failed write is ignored:
+  // the panel then shows the last good heartbeat.
+  private writeHeartbeat(running: boolean, lastError: string | null): void {
+    try {
+      const token = getTelegramTokenSource(this.rootDir);
+      let allowlistCount = 0;
+      try {
+        allowlistCount = loadAllowlist(this.rootDir).length;
+      } catch {
+        allowlistCount = 0;
+      }
+      writeTelegramHeartbeat(this.rootDir, {
+        lastPollAt: new Date(this.now()).toISOString(),
+        running,
+        pid: process.pid,
+        tenantId: this.ctx.tenantId,
+        tokenSource: token.source,
+        allowlistCount,
+        lastError,
+      });
+    } catch {
+      // Ignored on purpose, see above.
+    }
   }
 
   private telegramDetail(userId: number, extra?: string): string {

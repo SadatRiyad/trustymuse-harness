@@ -205,7 +205,7 @@ working folder. Never run a live browser job while the tests fail.
 ## 20. How do I update to a new version?
 
 Pull the latest code from the public repo, run `npm install`, then run
-`npm test`. All 137 test groups must pass before you use the new version.
+`npm test`. All 152 test groups must pass before you use the new version.
 Your state lives under `state/tenants/<your-id>/` and `profiles/`, and
 those folders are gitignored, so a pull does not touch them. Check the
 new version number in `package.json` and read the new `V1-*.md` notes
@@ -270,10 +270,11 @@ connect and disconnect models, turn HOLD on and off, run one browser job
 at a time on a connected account with `/run`, and give plain-language
 instructions with `/do`. Only allowlisted user ids get any reply. The
 bot never deploys, publishes, merges, or sends anything. HOLD blocks
-every Telegram write. Stop the bot any time with Ctrl+C. No live bot run
-has happened yet, because no real token exists; the bot has only been
-run against a mock Telegram API in tests. See
-`V2-0-TELEGRAM-FULL-CONTROL.md`.
+every Telegram write. Stop the bot any time with `telegram-stop`. V2.1
+starts the bot through the supervisor and writes a heartbeat on every
+poll, so `telegram-status` and the panel can show RUNNING or STOPPED
+honestly. A live bot is running on the owner's install. See
+`V2-1-BOT-START-FROM-PANEL.md`.
 
 ## 24. What does /do do, and does it deploy?
 
@@ -290,10 +291,33 @@ proof the work is good. See `V2-0-TELEGRAM-FULL-CONTROL.md`.
 
 ## 25. Can I paste the bot token into the dashboard box?
 
-Not yet. V2.0 builds the file-token fallback the box needs: the bot
-reads the token from `TELEGRAM_BOT_TOKEN` first, then from the file
-token in `state/telegram.json`. The TrustyHarness panel box that writes
-that file token is a separate panel change that comes after this CLI
-work. Until then, set the token in the environment. Check it any time
-with `telegram-token-status`, which prints only set or not set, never
-the value. See `V2-0-TELEGRAM-FULL-CONTROL.md`.
+Yes. V2.0 built the file-token fallback, and the TrustyHarness panel
+box writes the token into `state/telegram.json` under `botToken`. The
+panel shows only the last 4 characters. Check it any time with
+`telegram-token-status`, which prints only set or not set, never the
+value. See `V2-1-BOT-START-FROM-PANEL.md`.
+
+## 26. I saved the token in the panel, but the bot does not reply to /start. Why?
+
+Saving the token does not start the bot. Before V2.1 the panel only
+saved the token, and nothing started the bot process, so `/start` got
+no reply. V2.1 fixes it: `telegram-start` starts the bot in the
+background through the supervisor, and the panel Start button uses
+the same supervisor. Also check the allowlist: a non-allowlisted user
+gets no reply at all, by design. Send `/start`, read your numeric user
+id from the bot log (`logs/telegram-bot.log`), and allowlist it with
+`telegram-allow --user-id <id> --label "<Name>"`. Then send `/start`
+again. See `V2-1-BOT-START-FROM-PANEL.md` and
+`TROUBLESHOOTING.md` entry 18.
+
+## 27. How do I start and stop the bot, and how do I know it is running?
+
+Start it with `node dist/index.js telegram-start`, stop it with
+`node dist/index.js telegram-stop`, and check it with
+`node dist/index.js telegram-status`. Status prints RUNNING or
+STOPPED, the pid, the token source, the allowlist count, and the
+heartbeat last poll time. The bot writes a heartbeat to
+`state/telegram-heartbeat.json` on every poll, so the panel can show
+RUNNING or STOPPED honestly. If a bot is already running,
+`telegram-start` adopts it into `state/telegram-bot.pid` instead of
+starting a duplicate. See `V2-1-BOT-START-FROM-PANEL.md`.

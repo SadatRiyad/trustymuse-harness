@@ -669,7 +669,9 @@ it. The confirmation is audit logged.
 
 Control the whole harness from Telegram with a bot you own. The bot uses long
 polling only, no webhook, no public server. See
-`V2-0-TELEGRAM-FULL-CONTROL.md` for the full guide.
+`V2-1-BOT-START-FROM-PANEL.md` for the supervisor contract, the heartbeat,
+and the poll loop fix, and `V2-0-TELEGRAM-FULL-CONTROL.md` for the full
+command list, `/do`, and the deploy gate.
 
 ### telegram-start
 
@@ -678,11 +680,35 @@ export TELEGRAM_BOT_TOKEN=<token from @BotFather>
 node dist/index.js telegram-start [--tenant <id>]
 ```
 
-Starts the bot loop for the resolved tenant. The token comes from
+Starts the bot in the background through the supervisor
+(`scripts/telegram-bot-supervisor.sh`), and adopts a bot that is
+already running instead of starting a duplicate. The token comes from
 `TELEGRAM_BOT_TOKEN` first, then from the file token in gitignored
 `state/telegram.json`. Starting without a token in either place refuses
 with a message telling you to create a bot with @BotFather. Stop the bot
-with Ctrl+C. Only allowlisted Telegram user ids get a reply.
+with `telegram-stop`. Only allowlisted Telegram user ids get a reply.
+
+### telegram-stop
+
+```bash
+node dist/index.js telegram-stop
+```
+
+Stops the bot through the supervisor. It kills only a telegram bot
+process, prefers the pid in `state/telegram-bot.pid`, and removes the
+pid file. A zombie counts as dead, so the stop never waits on a bot
+that is already dead.
+
+### telegram-status
+
+```bash
+node dist/index.js telegram-status
+```
+
+Prints RUNNING or STOPPED, the pid, the token source, the allowlist
+count, and the heartbeat last poll time. The token value is never
+printed. The heartbeat is written by the bot to
+`state/telegram-heartbeat.json` on every poll.
 
 ### telegram-token-status
 
