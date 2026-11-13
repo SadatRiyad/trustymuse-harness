@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Troubleshooting
 
-Version 1.9.0. Each entry has a symptom, a cause, and an exact fix. Read
+Version 2.0.0. Each entry has a symptom, a cause, and an exact fix. Read
 the symptom that matches what you see. Do not retry a failed step in a
 loop. Find the cause first.
 
@@ -345,12 +345,21 @@ allowlisted. The bot answers only allowlisted users, and a
 non-allowlisted user gets no reply at all, by design.
 
 Fix: create the bot with @BotFather, then set the token in the
-environment only, never in a file:
+environment, or save it from the TrustyHarness panel box, which writes
+the file token in `state/telegram.json`:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=<token from @BotFather>
 node dist/index.js telegram-start
 ```
+
+Check what is set with `telegram-token-status`. It prints only set or
+not set, and the source, env or file, never the value. If the status
+says not set, no token is in either place. If it says set from file
+but the bot still refuses, the file token may be corrupt: check
+`state/telegram.json` by hand, or remove it with
+`telegram-token-clear` and set the environment token instead. The
+environment token wins when both are set.
 
 Then send `/start` to the bot, read your numeric Telegram user id from
 the terminal where the bot runs, and allowlist yourself:
@@ -364,4 +373,24 @@ Send `/start` again. If the bot still does not reply, check
 log for a `telegram_unauthorized` event with your id. If
 `telegram-start` prints "Tenant check failed", run `setup` first: a
 fresh install has no tenant registry yet. See
-`V1-9-TELEGRAM-BOT.md`.
+`V2-0-TELEGRAM-FULL-CONTROL.md`.
+
+## 17. /run refuses a browser job, or /do never runs the pipeline
+
+Symptom: `/run` replies "Browser job was not started." Or `/do plan
+with chatgpt then audit with claude: ...` creates packets instead of
+running the pipeline.
+
+Cause: a gate refused the job. The gates, in order, are HOLD on,
+browser mode off, the model has no wired driver, the account was not
+found or is a different provider, or the account is not connected.
+For the pipeline, either model without a connected browser account
+falls back to packets.
+
+Fix: read the exact reason in the bot reply. Turn HOLD off with
+`/hold off` and then YES. Turn browser mode on in `config.yaml` after
+reading `V1-1-BROWSER-MODE.md`. Verify the login with
+`browser-connect --account <id>` on the command line, then check
+`/browser_status`. For the pipeline, both models need a connected
+account: one for the plan model, one for the audit model. See
+`V2-0-TELEGRAM-FULL-CONTROL.md`.

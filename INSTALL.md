@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V1.9 runs 119 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 17.
+All test suites must pass before you use it. V2.0 runs 137 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 35.
 
 If Chromium is missing for browser mode, install it with:
 
@@ -84,16 +84,20 @@ for a password or an API key. Then:
 5. Check the audit log:
    `node dist/index.js audit`
 
-## Telegram Bot control (V1.9)
+## Telegram full control (V2.0)
 
-Control the harness from your phone with a Telegram Bot. Create the bot
-with @BotFather in Telegram, then set the token in the environment only,
-never in a file:
+Control the whole harness from your phone with a Telegram Bot. Create the bot
+with @BotFather in Telegram, then set the token in the environment:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=<token from @BotFather>
 node dist/index.js telegram-start
 ```
+
+Or save the token from the TrustyHarness panel box, which writes the file
+token in `state/telegram.json`. The environment token wins when both are set.
+Check it any time with `telegram-token-status`, which prints only set or not
+set, never the value. Remove the file token with `telegram-token-clear`.
 
 Send `/start` to the bot, read your numeric Telegram user id from the
 terminal where the bot runs, and allowlist yourself:
@@ -102,12 +106,14 @@ terminal where the bot runs, and allowlist yourself:
 node dist/index.js telegram-allow --user-id <id> --label "Your Name"
 ```
 
-Send `/start` again and the bot replies. From Telegram you can check
-status, models, projects, browser, analytics, and audit, and create a
-draft packet with `/packet`. The bot never runs a browser job, and it
-never sends, publishes, merges, or deploys anything. Stop it any time
-with Ctrl+C. See `docs/V1-9-TELEGRAM-BOT.md` for the full command list
-and the safety rules.
+Send `/start` again and the bot replies. From Telegram you can check status,
+models, projects, browser, analytics, and audit, create tasks and packets,
+add, remove, and pause projects, connect and disconnect models, turn HOLD on
+and off, run one browser job at a time on a connected account with `/run`,
+and give plain-language instructions with `/do`. The bot never deploys,
+publishes, merges, or sends anything. Stop it any time with Ctrl+C. See
+`docs/V2-0-TELEGRAM-FULL-CONTROL.md` for the full command list, the `/do`
+patterns, and the deploy gate.
 
 ## What is per tenant, and what is shared
 

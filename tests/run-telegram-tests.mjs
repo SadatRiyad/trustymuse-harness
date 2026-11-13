@@ -22,13 +22,21 @@ const {
   denyTelegramUser,
   isTelegramUserAllowed,
   loadAllowlist,
+  loadTelegramState,
+  setTelegramFileToken,
+  clearTelegramFileToken,
+  getTelegramTokenSource,
   requireTelegramToken,
+  parseDoInstruction,
+  auditPassedByMarkers,
   tokenizeArgs,
   truncateForTelegram,
 } = await import(path.join(distDir, "telegram", "bot.js"));
 const { loadConfig } = await import(path.join(distDir, "config.js"));
 const { appendAudit, readAuditEvents } = await import(path.join(distDir, "audit.js"));
 const { addTenant } = await import(path.join(distDir, "tenants", "tenants.js"));
+const { addAccount, loadAccounts, saveAccounts, todayKey } = await import(path.join(distDir, "session", "accounts.js"));
+const { MockBrowserDriver } = await import(path.join(distDir, "session", "browser.js"));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "trustymuse-harness-telegram-test-"));
 const repoVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf-8")).version;
@@ -93,8 +101,36 @@ class MockTelegramApi {
   }
 }
 
-function makeBot(root, ctx, config, api) {
-  return createTelegramBot({ rootDir: root, ctx, config, api, now });
+function makeBot(root, ctx, config, api, extra) {
+  return createTelegramBot({ rootDir: root, ctx, config, api, now, ...(extra || {}) });
+}
+
+function writeBrowserConfig(root) {
+  fs.writeFileSync(
+    path.join(root, "config.yaml"),
+    "browser:\n  enabled: true\n  headless: true\n  pacing_ms: 8000\n  daily_limit_per_account: 20\n",
+    "utf-8",
+  );
+}
+
+function makeAccount(root, ctx, provider, id, connected) {
+  const account = addAccount(
+    { provider, id, label: `${provider} ${id}` },
+    { rootDir: root, profileRoot: path.join(root, "profiles"), tenantId: ctx.tenantId },
+  );
+  if (connected) {
+    const accounts = loadAccounts(root, ctx.tenantId);
+    const found = accounts.find((a) => a.id === id);
+    found.browserConnected = true;
+    found.browserConnectedAt = new Date().toISOString();
+    found.browserLastVerified = new Date().toISOString();
+    saveAccounts(accounts, root, ctx.tenantId);
+  }
+  return account;
+}
+
+function mockDriverFactory(responses) {
+  return (account) => new MockBrowserDriver({ responseText: responses[account.provider] || `Mock response for ${account.provider}.` });
 }
 
 // The temp root needs a package.json so /status can read the version.
@@ -352,12 +388,12 @@ fs.copyFileSync(path.join(rootDir, "package.json"), path.join(tmp, "package.json
   const bot = makeBot(root, ctx, config, api);
   await bot.handleUpdate(makeUpdate(1, 111, "/run_browser --model chatgpt --account main --type seo --task \"Run it.\""));
   assert.equal(api.sent.length, 1);
-  assert.ok(api.sent[0].text.includes("Browser jobs run from the CLI only"));
+  assert.ok(api.sent[0].text.includes("Use /run --account"));
   const events = readAudit(root, "demo-tenant");
   assert.equal(events.length, 1);
   assert.equal(events[0].event, "telegram_run_browser_refused");
   assert.equal(events[0].result, "blocked");
-  ok("/run_browser is refused");
+  ok("/run_browser is refused, /run is named instead");
 }
 
 // 14. /analytics_preview prints the counts-only payload.
@@ -446,6 +482,521 @@ fs.copyFileSync(path.join(rootDir, "package.json"), path.join(tmp, "package.json
   assert.ok(startOut.includes("Telegram bot was not started."));
   assert.ok(startOut.includes("No Telegram bot token found"));
   ok("real CLI telegram-allow, telegram-allowlist, telegram-link, and telegram-start refusal");
+}
+
+// V2.0 groups.
+
+// 17. Token from the file fallback, and env precedence over the file.
+{
+  const root = path.join(tmp, "token-fallback");
+  fs.mkdirSync(root, { recursive: true });
+  setTelegramFileToken(root, "file-token-for-test-1234567890");
+  assert.equal(loadTelegramState(root).botToken, "file-token-for-test-1234567890");
+  assert.equal(requireTelegramToken({}, root), "file-token-for-test-1234567890");
+  assert.equal(requireTelegramToken({ TELEGRAM_BOT_TOKEN: "env-token-for-test-1234567890" }, root), "env-token-for-test-1234567890");
+  assert.deepEqual(getTelegramTokenSource(root, {}), { set: true, source: "file" });
+  assert.deepEqual(getTelegramTokenSource(root, { TELEGRAM_BOT_TOKEN: "env-token-for-test-1234567890" }), { set: true, source: "env" });
+  const empty = path.join(tmp, "token-none");
+  fs.mkdirSync(empty, { recursive: true });
+  assert.deepEqual(getTelegramTokenSource(empty, {}), { set: false, source: "none" });
+  assert.throws(() => requireTelegramToken({}, empty), /No Telegram bot token found/);
+  assert.throws(() => requireTelegramToken({}), /@BotFather/);
+  ok("token from file fallback and env precedence");
+}
+
+// 18. telegram-token-status never prints a token, and telegram-token-clear removes it.
+{
+  const scratch = path.join(tmp, "token-cli");
+  fs.mkdirSync(scratch, { recursive: true });
+  fs.mkdirSync(path.join(scratch, "dist"), { recursive: true });
+  fs.copyFileSync(path.join(distDir, "index.js"), path.join(scratch, "dist", "index.js"));
+  for (const sub of fs.readdirSync(distDir)) {
+    const subPath = path.join(distDir, sub);
+    if (!fs.statSync(subPath).isDirectory()) {
+      continue;
+    }
+    fs.mkdirSync(path.join(scratch, "dist", sub), { recursive: true });
+    for (const file of fs.readdirSync(subPath)) {
+      fs.copyFileSync(path.join(subPath, file), path.join(scratch, "dist", sub, file));
+    }
+  }
+  for (const file of fs.readdirSync(distDir)) {
+    if (file.endsWith(".js") && file !== "index.js") {
+      fs.copyFileSync(path.join(distDir, file), path.join(scratch, "dist", file));
+    }
+  }
+  fs.copyFileSync(path.join(rootDir, "package.json"), path.join(scratch, "package.json"));
+  fs.symlinkSync(path.join(rootDir, "node_modules"), path.join(scratch, "node_modules"));
+  const env = { ...process.env };
+  delete env.TELEGRAM_BOT_TOKEN;
+  execFileSync("node", ["dist/index.js", "setup", "--id", "demo-tenant", "--name", "Demo Tenant"], { cwd: scratch, encoding: "utf-8", env });
+  const before = execFileSync("node", ["dist/index.js", "telegram-token-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(before.includes("not set"));
+  setTelegramFileToken(scratch, "SECRET-FILE-TOKEN-98765");
+  const statusOut = execFileSync("node", ["dist/index.js", "telegram-token-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(statusOut.includes("set"));
+  assert.ok(statusOut.includes("file"));
+  assert.ok(!statusOut.includes("SECRET-FILE-TOKEN-98765"));
+  const envStatusOut = execFileSync("node", ["dist/index.js", "telegram-token-status"], { cwd: scratch, encoding: "utf-8", env: { ...env, TELEGRAM_BOT_TOKEN: "SECRET-ENV-TOKEN-13579" } });
+  assert.ok(envStatusOut.includes("env"));
+  assert.ok(!envStatusOut.includes("SECRET-ENV-TOKEN-13579"));
+  const clearOut = execFileSync("node", ["dist/index.js", "telegram-token-clear"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(clearOut.includes("removed"));
+  assert.equal(loadTelegramState(scratch).botToken, null);
+  const after = execFileSync("node", ["dist/index.js", "telegram-token-status"], { cwd: scratch, encoding: "utf-8", env });
+  assert.ok(after.includes("not set"));
+  ok("telegram-token-status never prints a token, and telegram-token-clear removes it");
+}
+
+// 19. Setting the file token keeps the allowlist, and allowlisting keeps the file token.
+{
+  const root = path.join(tmp, "token-preserve");
+  fs.mkdirSync(root, { recursive: true });
+  allowTelegramUser(root, 111, "Owner");
+  setTelegramFileToken(root, "file-token-for-test-1234567890");
+  assert.equal(loadAllowlist(root).length, 1);
+  assert.equal(loadAllowlist(root)[0].id, 111);
+  allowTelegramUser(root, 222, "Helper");
+  assert.equal(loadTelegramState(root).botToken, "file-token-for-test-1234567890");
+  assert.equal(loadAllowlist(root).length, 2);
+  assert.equal(clearTelegramFileToken(root), true);
+  assert.equal(clearTelegramFileToken(root), false);
+  assert.equal(loadAllowlist(root).length, 2);
+  assert.throws(() => setTelegramFileToken(root, "short"), /must be one token/);
+  assert.throws(() => setTelegramFileToken(root, "has space in it 1234567890"), /must be one token/);
+  ok("file token and allowlist preserve each other");
+}
+
+// 20. /project_add through the bot, and a path outside the workspace is refused.
+{
+  const root = path.join(tmp, "project-add");
+  fs.mkdirSync(root, { recursive: true });
+  const workspace = path.join(root, "workspace");
+  const appDir = path.join(workspace, "my-app");
+  fs.mkdirSync(appDir, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { workspaceRoot: workspace });
+  await bot.handleUpdate(makeUpdate(1, 111, `/project_add my-app "My App" web-app ${appDir}`));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Project connected: my-app"));
+  assert.ok(api.sent[0].text.includes("My App"));
+  await bot.handleUpdate(makeUpdate(2, 111, "/project_add outside \"Outside\" web-app /tmp/outside-app"));
+  assert.equal(api.sent.length, 2);
+  assert.ok(api.sent[1].text.includes("Project was not connected."));
+  assert.ok(api.sent[1].text.includes("must be inside the workspace"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 2);
+  assert.equal(events[0].event, "telegram_project_added");
+  assert.equal(events[1].event, "telegram_project_blocked");
+  assert.equal(events[1].result, "blocked");
+  ok("/project_add through the bot, outside path refused");
+}
+
+// 21. /project_remove and /project_pause through the bot.
+{
+  const root = path.join(tmp, "project-remove-pause");
+  fs.mkdirSync(root, { recursive: true });
+  const workspace = path.join(root, "workspace");
+  fs.mkdirSync(path.join(workspace, "app-a"), { recursive: true });
+  fs.mkdirSync(path.join(workspace, "app-b"), { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { workspaceRoot: workspace });
+  await bot.handleUpdate(makeUpdate(1, 111, `/project_add app-a "App A" web-app ${path.join(workspace, "app-a")}`));
+  await bot.handleUpdate(makeUpdate(2, 111, `/project_add app-b "App B" web-app ${path.join(workspace, "app-b")}`));
+  await bot.handleUpdate(makeUpdate(3, 111, "/project_pause app-a"));
+  assert.ok(api.sent[2].text.includes("Project paused: app-a"));
+  await bot.handleUpdate(makeUpdate(4, 111, "/project_remove app-b"));
+  assert.ok(api.sent[3].text.includes("Project disconnected: app-b"));
+  await bot.handleUpdate(makeUpdate(5, 111, "/project_list"));
+  assert.ok(api.sent[4].text.includes("Connected projects: 1"));
+  assert.ok(api.sent[4].text.includes("app-a"));
+  assert.ok(!api.sent[4].text.includes("app-b"));
+  await bot.handleUpdate(makeUpdate(6, 111, "/project_remove missing"));
+  assert.ok(api.sent[5].text.includes("Project was not removed."));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 6);
+  assert.deepEqual(events.map((e) => e.event), [
+    "telegram_project_added",
+    "telegram_project_added",
+    "telegram_project_paused",
+    "telegram_project_removed",
+    "telegram_projects",
+    "telegram_project_blocked",
+  ]);
+  ok("/project_remove and /project_pause through the bot");
+}
+
+// 22. /model_connect and /model_disconnect through the bot, disconnect refused with an active account.
+{
+  const root = path.join(tmp, "model-connect-bot");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  await bot.handleUpdate(makeUpdate(1, 111, "/model_connect gemini"));
+  assert.ok(api.sent[0].text.includes("Model connected: gemini"));
+  await bot.handleUpdate(makeUpdate(2, 111, "/model_connect openai-api"));
+  assert.ok(api.sent[1].text.includes("Model was not connected."));
+  assert.ok(api.sent[1].text.includes("API model"));
+  makeAccount(root, ctx, "chatgpt", "main", false);
+  await bot.handleUpdate(makeUpdate(3, 111, "/model_connect chatgpt"));
+  assert.ok(api.sent[2].text.includes("Model connected: chatgpt"));
+  await bot.handleUpdate(makeUpdate(4, 111, "/model_disconnect chatgpt"));
+  assert.ok(api.sent[3].text.includes("Model was not disconnected."));
+  assert.ok(api.sent[3].text.includes("active browser account"));
+  await bot.handleUpdate(makeUpdate(5, 111, "/model_disconnect gemini"));
+  assert.ok(api.sent[4].text.includes("Model disconnected: gemini"));
+  await bot.handleUpdate(makeUpdate(6, 111, "/model_disconnect gemini"));
+  assert.ok(api.sent[5].text.includes("Model was not disconnected."));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 6);
+  assert.deepEqual(events.map((e) => e.event), [
+    "telegram_model_connected",
+    "telegram_model_blocked",
+    "telegram_model_connected",
+    "telegram_model_blocked",
+    "telegram_model_disconnected",
+    "telegram_model_blocked",
+  ]);
+  ok("/model_connect and /model_disconnect through the bot, disconnect refused with an active account");
+}
+
+// 23. /hold on is immediate, /hold off needs YES, and a non-YES message cancels it.
+{
+  const root = path.join(tmp, "hold-bot");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  assert.equal(config.hold, false);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  await bot.handleUpdate(makeUpdate(1, 111, "/hold on"));
+  assert.ok(api.sent[0].text.includes("HOLD is now ON"));
+  assert.equal(loadConfig(root).hold, true);
+  await bot.handleUpdate(makeUpdate(2, 111, "/hold off"));
+  assert.ok(api.sent[1].text.includes("Reply YES"));
+  assert.equal(loadConfig(root).hold, true);
+  await bot.handleUpdate(makeUpdate(3, 111, "/status"));
+  assert.ok(api.sent[2].text.includes("HOLD: ON"));
+  assert.equal(loadConfig(root).hold, true);
+  await bot.handleUpdate(makeUpdate(4, 111, "/hold off"));
+  assert.ok(api.sent[3].text.includes("Reply YES"));
+  await bot.handleUpdate(makeUpdate(5, 111, "YES"));
+  assert.ok(api.sent[4].text.includes("HOLD is now OFF"));
+  assert.equal(loadConfig(root).hold, false);
+  const events = readAudit(root, "demo-tenant");
+  assert.deepEqual(events.map((e) => e.event), [
+    "telegram_hold_on",
+    "telegram_hold_off_requested",
+    "status_checked",
+    "telegram_hold_off_requested",
+    "telegram_hold_off_confirmed",
+  ]);
+  ok("/hold on is immediate, /hold off needs YES, non-YES cancels it");
+}
+
+// 24. /run refuses a disconnected account.
+{
+  const root = path.join(tmp, "run-disconnected");
+  fs.mkdirSync(root, { recursive: true });
+  writeBrowserConfig(root);
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  makeAccount(root, ctx, "chatgpt", "main", false);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { driverFactory: mockDriverFactory({ chatgpt: "Mock response." }) });
+  await bot.handleUpdate(makeUpdate(1, 111, '/run --account main --task "Write a draft."'));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Browser job was not started."));
+  assert.ok(api.sent[0].text.includes("browser-connect"));
+  assert.equal(fs.existsSync(path.join(root, "browser-results", "demo-tenant")), false);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_browser_job_blocked");
+  assert.equal(events[0].result, "blocked");
+  ok("/run refuses a disconnected account");
+}
+
+// 25. /run enforces the daily limit.
+{
+  const root = path.join(tmp, "run-daily-limit");
+  fs.mkdirSync(root, { recursive: true });
+  writeBrowserConfig(root);
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  makeAccount(root, ctx, "chatgpt", "main", true);
+  const accounts = loadAccounts(root, ctx.tenantId);
+  const account = accounts.find((a) => a.id === "main");
+  account.dailyCount = 20;
+  account.dailyDate = todayKey();
+  saveAccounts(accounts, root, ctx.tenantId);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { driverFactory: mockDriverFactory({ chatgpt: "Mock response." }) });
+  await bot.handleUpdate(makeUpdate(1, 111, '/run --account main --task "Write a draft."'));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Browser job did not finish."));
+  assert.ok(api.sent[0].text.includes("Daily limit reached"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_browser_job_blocked");
+  ok("/run enforces the daily limit");
+}
+
+// 26. /run succeeds with the mock driver, returns the reply, writes the result file, one audit event.
+{
+  const root = path.join(tmp, "run-success");
+  fs.mkdirSync(root, { recursive: true });
+  writeBrowserConfig(root);
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  makeAccount(root, ctx, "chatgpt", "main", true);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { driverFactory: mockDriverFactory({ chatgpt: "Mock plan result: build the landing page with three sections." }) });
+  await bot.handleUpdate(makeUpdate(1, 111, '/run --account main --task "Write a plan for a landing page."'));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Browser job finished in 1 attempt(s)"));
+  assert.ok(api.sent[0].text.includes("Mock plan result: build the landing page with three sections."));
+  assert.ok(api.sent[0].text.includes("Result saved:"));
+  const resultFiles = fs.readdirSync(path.join(root, "browser-results", "demo-tenant"));
+  assert.equal(resultFiles.length, 1);
+  assert.ok(resultFiles[0].startsWith("chatgpt-main-untitled-task-"));
+  assert.ok(fs.readFileSync(path.join(root, "browser-results", "demo-tenant", resultFiles[0]), "utf-8").includes("Mock plan result"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_browser_job_done");
+  assert.equal(events[0].result, "ok");
+  assert.ok(events[0].detail.includes("account:main"));
+  assert.ok(!events[0].detail.includes("landing page"));
+  const savedAccounts = loadAccounts(root, ctx.tenantId);
+  assert.equal(savedAccounts[0].dailyCount, 1);
+  ok("/run succeeds with the mock driver, one audit event");
+}
+
+// 27. /do parses the three patterns and the plain fallback.
+{
+  const pipeline = parseDoInstruction("plan with chatgpt then audit with claude: build a landing page");
+  assert.equal(pipeline.kind, "pipeline");
+  assert.equal(pipeline.planModel, "chatgpt");
+  assert.equal(pipeline.auditModel, "claude");
+  assert.equal(pipeline.taskText, "build a landing page");
+  assert.equal(pipeline.wantsDeploy, false);
+  const deploy = parseDoInstruction("plan with chatgpt, audit with claude: build it and deploy it live");
+  assert.equal(deploy.kind, "pipeline");
+  assert.equal(deploy.wantsDeploy, true);
+  const project = parseDoInstruction("project trustytouch: write the pricing page");
+  assert.equal(project.kind, "project");
+  assert.equal(project.projectId, "trustytouch");
+  assert.equal(project.taskText, "write the pricing page");
+  const model = parseDoInstruction("write a launch post with claude");
+  assert.equal(model.kind, "model");
+  assert.equal(model.model, "claude");
+  assert.equal(model.taskText, "write a launch post");
+  assert.equal(parseDoInstruction("write a blog post with images").kind, "plain");
+  assert.equal(parseDoInstruction("just do the thing").kind, "plain");
+  assert.equal(auditPassedByMarkers("All good, no problems here."), true);
+  assert.equal(auditPassedByMarkers("Failed: a step is missing."), false);
+  assert.equal(auditPassedByMarkers("Do not deploy, the build is blocked."), false);
+  ok("/do parses the three patterns and the plain fallback");
+}
+
+// 28. /do pipeline with deploy words and no browser accounts creates both packets and never deploys.
+{
+  const root = path.join(tmp, "do-pipeline-packets");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt", "claude"]);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  await bot.handleUpdate(makeUpdate(1, 111, "/do plan with chatgpt then audit with claude: build a landing page and deploy it live"));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Plan packet:"));
+  assert.ok(api.sent[0].text.includes("Audit packet:"));
+  assert.ok(api.sent[0].text.includes("Nothing was deployed."));
+  assert.ok(api.sent[0].text.includes("audit has not run yet"));
+  assert.ok(!api.sent[0].text.includes("deploying now"));
+  const packets = fs.readdirSync(path.join(root, "packets", "demo-tenant"));
+  assert.equal(packets.length, 2);
+  assert.ok(packets.some((f) => f.startsWith("chatgpt-research-plan-")));
+  assert.ok(packets.some((f) => f.startsWith("claude-code_review-audit-")));
+  assert.equal(fs.existsSync(path.join(root, "browser-results", "demo-tenant")), false);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_do_done");
+  ok("/do pipeline with deploy words and no browser accounts never deploys");
+}
+
+// 29. /do pipeline with mock drivers for both accounts runs plan then audit and reports the deploy verdict.
+{
+  const root = path.join(tmp, "do-pipeline-run");
+  fs.mkdirSync(root, { recursive: true });
+  writeBrowserConfig(root);
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt", "claude"]);
+  makeAccount(root, ctx, "chatgpt", "chatgpt-main", true);
+  makeAccount(root, ctx, "claude", "claude-main", true);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, {
+    driverFactory: mockDriverFactory({
+      chatgpt: "Mock plan: three sections, hero, pricing, footer.",
+      claude: "Mock audit: the plan looks good, no issues found.",
+    }),
+  });
+  await bot.handleUpdate(makeUpdate(1, 111, "/do plan with chatgpt then audit with claude: build a landing page and deploy it live"));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("Pipeline finished."));
+  assert.ok(api.sent[0].text.includes("Audit passed"));
+  assert.ok(api.sent[0].text.includes("Ready to deploy"));
+  assert.ok(api.sent[0].text.includes("needs your approval in the Muse app"));
+  assert.ok(api.sent[0].text.includes("Mock audit: the plan looks good"));
+  assert.ok(api.sent[0].text.includes("Mock plan: three sections"));
+  const resultFiles = fs.readdirSync(path.join(root, "browser-results", "demo-tenant"));
+  assert.equal(resultFiles.length, 2);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_do_done");
+  assert.equal(events[0].result, "ok");
+  ok("/do pipeline with mock drivers runs plan then audit and reports the deploy verdict");
+}
+
+// 30. /do project pattern creates a project-scoped packet.
+{
+  const root = path.join(tmp, "do-project");
+  fs.mkdirSync(root, { recursive: true });
+  const workspace = path.join(root, "workspace");
+  const appDir = path.join(workspace, "my-app");
+  fs.mkdirSync(appDir, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { workspaceRoot: workspace });
+  await bot.handleUpdate(makeUpdate(1, 111, `/project_add my-app "My App" web-app ${appDir}`));
+  await bot.handleUpdate(makeUpdate(2, 111, "/do project my-app: write the pricing page draft"));
+  assert.equal(api.sent.length, 2);
+  assert.ok(api.sent[1].text.includes("Task created:"));
+  assert.ok(api.sent[1].text.includes("Project: my-app."));
+  const packets = fs.readdirSync(path.join(root, "packets", "demo-tenant"));
+  assert.equal(packets.length, 1);
+  const content = fs.readFileSync(path.join(root, "packets", "demo-tenant", packets[0]), "utf-8");
+  assert.ok(content.includes("My App"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 2);
+  assert.equal(events[1].event, "telegram_do_done");
+  ok("/do project pattern creates a project-scoped packet");
+}
+
+// 31. Rate limit still applies to writes.
+{
+  const root = path.join(tmp, "rate-limit-writes");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  for (let i = 1; i <= 20; i += 1) {
+    await bot.handleUpdate(makeUpdate(i, 111, "/project_list"));
+  }
+  assert.equal(api.sent.length, 20);
+  await bot.handleUpdate(makeUpdate(21, 111, "/project_add late \"Late\" web-app /tmp/late"));
+  assert.equal(api.sent.length, 21);
+  assert.ok(api.sent[20].text.includes("Slow down"));
+  assert.equal(fs.existsSync(path.join(root, "state", "tenants", "demo-tenant", "projects.json")), false);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.filter((e) => e.event === "telegram_rate_limited").length, 1);
+  ok("rate limit still applies to writes");
+}
+
+// 32. One audit event per write command.
+{
+  const root = path.join(tmp, "one-event-writes");
+  fs.mkdirSync(root, { recursive: true });
+  const workspace = path.join(root, "workspace");
+  const appDir = path.join(workspace, "my-app");
+  fs.mkdirSync(appDir, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { workspaceRoot: workspace });
+  await bot.handleUpdate(makeUpdate(1, 111, `/project_add my-app "My App" web-app ${appDir}`));
+  await bot.handleUpdate(makeUpdate(2, 111, "/model_connect gemini"));
+  await bot.handleUpdate(makeUpdate(3, 111, "/hold on"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((e) => e.event), ["telegram_project_added", "telegram_model_connected", "telegram_hold_on"]);
+  assert.ok(events.every((e) => (e.detail || "").includes("telegram_user:111")));
+  ok("one audit event per write command");
+}
+
+// 33. /task alias, /account_list, and /tenant_status reply.
+{
+  const root = path.join(tmp, "task-alias");
+  fs.mkdirSync(root, { recursive: true });
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  makeAccount(root, ctx, "chatgpt", "main", false);
+  const config = loadConfig(root);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api);
+  await bot.handleUpdate(makeUpdate(1, 111, '/task --model chatgpt --type content --title "Alias" --task "Write."'));
+  assert.ok(api.sent[0].text.includes("Packet created:"));
+  await bot.handleUpdate(makeUpdate(2, 111, "/account_list"));
+  assert.ok(api.sent[1].text.includes("Browser accounts: 1"));
+  assert.ok(api.sent[1].text.includes("main (chatgpt"));
+  await bot.handleUpdate(makeUpdate(3, 111, "/tenant_status"));
+  assert.ok(api.sent[2].text.includes("Tenant: Demo Tenant (demo-tenant"));
+  assert.ok(api.sent[2].text.includes("Budget: cap 0 USD"));
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((e) => e.event), ["packet_generated", "telegram_account_list", "telegram_tenant_status"]);
+  ok("/task alias, /account_list, and /tenant_status reply");
+}
+
+// 34. /run with HOLD on is refused.
+{
+  const root = path.join(tmp, "run-hold");
+  fs.mkdirSync(root, { recursive: true });
+  writeBrowserConfig(root);
+  fs.writeFileSync(path.join(root, "config.yaml"), "browser:\n  enabled: true\n  headless: true\n  pacing_ms: 8000\n  daily_limit_per_account: 20\npolicy:\n  hold: true\n", "utf-8");
+  const ctx = makeCtx(root, "demo-tenant", "Demo Tenant");
+  writeJson(path.join(ctx.stateDir, "models.json"), ["chatgpt"]);
+  makeAccount(root, ctx, "chatgpt", "main", true);
+  const config = loadConfig(root);
+  assert.equal(config.hold, true);
+  assert.equal(config.browser.enabled, true);
+  const api = new MockTelegramApi();
+  allowTelegramUser(root, 111, "Owner");
+  const bot = makeBot(root, ctx, config, api, { driverFactory: mockDriverFactory({ chatgpt: "Mock response." }) });
+  await bot.handleUpdate(makeUpdate(1, 111, '/run --account main --task "Write a draft."'));
+  assert.equal(api.sent.length, 1);
+  assert.ok(api.sent[0].text.includes("HOLD is on"));
+  assert.equal(fs.existsSync(path.join(root, "browser-results", "demo-tenant")), false);
+  const events = readAudit(root, "demo-tenant");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "telegram_browser_job_blocked");
+  ok("/run with HOLD on is refused");
 }
 
 // Tokenizer and truncation helpers.

@@ -1,6 +1,6 @@
 # TrustyMUSE Harness User Guide
 
-Version 1.9.0. This is the full command reference. Every command runs as
+Version 2.0.0. This is the full command reference. Every command runs as
 `node dist/index.js <command>`. Run `npm run build` or `npm test` first so
 `dist/` exists. Run `node dist/index.js help` at any time to see the same
 list in the terminal.
@@ -665,11 +665,11 @@ A no-op that confirms analytics is off and nothing is being sent. It
 changes nothing. The stored install id is kept, so Phase 2 can reuse
 it. The confirmation is audit logged.
 
-## Telegram Bot control
+## Telegram full control
 
-Control the harness from Telegram with a bot you own. The bot uses long
+Control the whole harness from Telegram with a bot you own. The bot uses long
 polling only, no webhook, no public server. See
-`V1-9-TELEGRAM-BOT.md` for the full guide.
+`V2-0-TELEGRAM-FULL-CONTROL.md` for the full guide.
 
 ### telegram-start
 
@@ -678,11 +678,29 @@ export TELEGRAM_BOT_TOKEN=<token from @BotFather>
 node dist/index.js telegram-start [--tenant <id>]
 ```
 
-Starts the bot loop for the resolved tenant. The token comes only from
-the `TELEGRAM_BOT_TOKEN` environment variable, never from a file.
-Starting without a token refuses with a message telling you to create a
-bot with @BotFather. Stop the bot with Ctrl+C. Only allowlisted Telegram
-user ids get a reply.
+Starts the bot loop for the resolved tenant. The token comes from
+`TELEGRAM_BOT_TOKEN` first, then from the file token in gitignored
+`state/telegram.json`. Starting without a token in either place refuses
+with a message telling you to create a bot with @BotFather. Stop the bot
+with Ctrl+C. Only allowlisted Telegram user ids get a reply.
+
+### telegram-token-status
+
+```bash
+node dist/index.js telegram-token-status
+```
+
+Prints only whether a token is set, and the source, env or file. The
+token value is never printed.
+
+### telegram-token-clear
+
+```bash
+node dist/index.js telegram-token-clear
+```
+
+Removes the file token from `state/telegram.json` and keeps the
+allowlist. The environment token, when set, is untouched.
 
 ### telegram-allow
 
@@ -694,7 +712,7 @@ Adds a numeric Telegram user id to the allowlist in gitignored
 `state/telegram.json`. The label is a name you choose so the audit log
 is readable. The bot never reads a Telegram username. Send `/start` to
 the bot first, then read the user id from the terminal where the bot
-runs.
+runs. The file token, when set, is kept: allowlisting never wipes it.
 
 ### telegram-deny
 
@@ -725,15 +743,29 @@ allowlist yourself. No tenant is needed for this command.
 
 ### Bot commands
 
-Once allowlisted, send these to the bot in Telegram. All are read-only
-except `/packet`, which creates a draft packet only.
+Once allowlisted, send these to the bot in Telegram. Read-only commands
+are `/start`, `/help`, `/status`, `/models`, `/projects`, `/project_list`,
+`/browser_status`, `/account_list`, `/tenant_status`,
+`/analytics_status`, `/analytics_preview`, and `/audit`. Write commands
+are `/packet` and `/task` (draft packet only), `/project_add`,
+`/project_remove`, `/project_pause`, `/model_connect`,
+`/model_disconnect`, `/hold on` and `/hold off`, `/run` (one browser job
+on a connected account), and `/do` (plain words into a packet or a
+plan-then-audit pipeline). HOLD blocks every write. `/hold off` asks for
+a YES in the next message first. Nothing here ever deploys.
 
 - `/start`, `/help`: greeting and the full command list.
 - `/status`: harness version, tenant, HOLD, budget cap and spend,
   models connected, browser accounts.
 - `/models`: the 9 subscription models and their connected state, with
   the connected-means-packet-only legend.
-- `/projects`: connected projects, kind, status, allowed task types.
+- `/projects`, `/project_list`: connected projects, kind, status, allowed task types.
+- `/project_add <id> <name> <kind> <path>`: connects a project. The path must be inside the workspace.
+- `/project_remove <id>`: disconnects a project.
+- `/project_pause <id>`: pauses a project.
+- `/model_connect <id>`, `/model_disconnect <id>`: connect and disconnect a subscription model. Disconnecting chatgpt or claude is refused while an active browser account for it exists.
+- `/account_list`: browser accounts and their state.
+- `/tenant_status`: tenant, budget, projects, accounts, audit count.
 - `/browser_status`: browser accounts and their connected state.
 - `/analytics_status`: analytics off, install id, last preview, last
   send never.
@@ -743,9 +775,13 @@ except `/packet`, which creates a draft packet only.
 - `/packet --model <id> --type <type> --title "<title>" --task "<task>" [--project <id>]`: creates a draft packet, exactly like the CLI
   packet command. Refused when HOLD is on, when the model is not
   connected, or when the project scope is wrong.
-- `/run_browser`: refused, always. Browser jobs run from the CLI only.
+- `/task`: the same as `/packet`, for a task and its packet.
+- `/run --account <id> --task "<task>" [--model <id>] [--type <type>] [--title "<title>"] [--project <id>]`: runs one browser job on a connected account. Refused when HOLD is on, when browser mode is off, when the account is disconnected, or when the daily limit is reached. The reply is the worker's own words, truncated to 4000 characters.
+- `/do <instruction>`: plain words into harness work. `plan with chatgpt then audit with claude: <task>` runs a plan-then-audit pipeline, `project <id>: <task>` makes a project-scoped packet, `<task> with <model>` picks the model. Never deploys: with deploy, live, or publish words it reports the audit verdict and says the deploy needs your approval in the Muse app.
+- `/hold on`: turns HOLD on at once. `/hold off`: asks for a YES in the next message first.
+- `/run_browser`: refused, always. Use `/run` for a connected account, or run-browser on the command line.
 
-Safety: HOLD blocks all Telegram writes including packet creation.
+Safety: HOLD blocks all Telegram writes, including packets, tasks, projects, models, browser jobs, and the pipeline.
 Budget cap 0 still blocks paid API calls. Each user may send at most 20
 commands per minute, then a polite slow-down reply. Every Telegram
 command writes exactly one audit event per tenant with the numeric

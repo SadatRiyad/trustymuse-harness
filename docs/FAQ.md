@@ -1,6 +1,6 @@
 # TrustyMUSE Harness FAQ
 
-Version 1.9.0. Short answers, drawn only from what the harness does and
+Version 2.0.0. Short answers, drawn only from what the harness does and
 what has been verified. If an answer says something is not verified, that
 is the answer. Do not assume otherwise.
 
@@ -205,7 +205,7 @@ working folder. Never run a live browser job while the tests fail.
 ## 20. How do I update to a new version?
 
 Pull the latest code from the public repo, run `npm install`, then run
-`npm test`. All 119 test groups must pass before you use the new version.
+`npm test`. All 137 test groups must pass before you use the new version.
 Your state lives under `state/tenants/<your-id>/` and `profiles/`, and
 those folders are gitignored, so a pull does not touch them. Check the
 new version number in `package.json` and read the new `V1-*.md` notes
@@ -264,10 +264,36 @@ node dist/index.js telegram-allow --user-id <id> --label "Your Name"
 
 Send `/start` again and the bot replies. From Telegram you can check
 `/status`, `/models`, `/projects`, `/browser_status`,
-`/analytics_status`, `/analytics_preview`, and `/audit`, and create a
-draft packet with `/packet`. Only allowlisted user ids get any reply.
-The bot never runs a browser job: `/run_browser` is refused, browser
-jobs run from the CLI only. HOLD blocks `/packet`. Stop the bot any time
-with Ctrl+C. No live bot run has happened yet, because no real token
-exists; the bot has only been run against a mock Telegram API in tests.
-See `V1-9-TELEGRAM-BOT.md`.
+`/analytics_status`, `/analytics_preview`, and `/audit`, create tasks
+and packets with `/task` and `/packet`, add, remove, and pause projects,
+connect and disconnect models, turn HOLD on and off, run one browser job
+at a time on a connected account with `/run`, and give plain-language
+instructions with `/do`. Only allowlisted user ids get any reply. The
+bot never deploys, publishes, merges, or sends anything. HOLD blocks
+every Telegram write. Stop the bot any time with Ctrl+C. No live bot run
+has happened yet, because no real token exists; the bot has only been
+run against a mock Telegram API in tests. See
+`V2-0-TELEGRAM-FULL-CONTROL.md`.
+
+## 24. What does /do do, and does it deploy?
+
+`/do` turns plain words into harness work, with no LLM call. It
+handles three patterns: `plan with chatgpt then audit with claude:
+<task>` runs a plan step and then an audit step, on the browser driver
+when both models have connected browser accounts, or as two packets
+when they do not; `project <id>: <task>` creates a project-scoped
+packet; `<task> with <model>` picks the model. It never deploys. When
+the instruction mentions deploy, live, or publish, it reports the
+audit verdict from a text-marker check and says the deploy itself
+needs your approval in the Muse app. A passing marker check is not
+proof the work is good. See `V2-0-TELEGRAM-FULL-CONTROL.md`.
+
+## 25. Can I paste the bot token into the dashboard box?
+
+Not yet. V2.0 builds the file-token fallback the box needs: the bot
+reads the token from `TELEGRAM_BOT_TOKEN` first, then from the file
+token in `state/telegram.json`. The TrustyHarness panel box that writes
+that file token is a separate panel change that comes after this CLI
+work. Until then, set the token in the environment. Check it any time
+with `telegram-token-status`, which prints only set or not set, never
+the value. See `V2-0-TELEGRAM-FULL-CONTROL.md`.

@@ -1,6 +1,16 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V1.9 local only, multi-tenant, public repo. Version 1.9.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet, no live Telegram bot run yet.
+Date: 2026-11-14. Status: V2.0 local only, multi-tenant, public repo. Version 2.0.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet, no live Telegram bot run yet.
+
+## What V2.0 adds: Telegram Full Control
+
+- Token fallback in `src/telegram/bot.ts`: the bot reads the token from `TELEGRAM_BOT_TOKEN` first, then from the file token in gitignored `state/telegram.json`, under the key `botToken`, so the TrustyHarness panel can later write it there from a box. The environment token wins when both are set. The token is never logged, never printed, and never included in an audit event. New CLI: `telegram-token-status` (prints only set or not set, and the source, env or file) and `telegram-token-clear` (removes the file token, keeps the allowlist). `telegram-link` now names the panel box as the second token path. The dashboard token box itself is a panel change that comes after this CLI work.
+- Full write commands for allowlisted ids only, all audit logged per tenant, HOLD blocks every one: `/project_add <id> <name> <kind> <path>` (path must be inside the workspace), `/project_remove <id>`, `/project_pause <id>`, `/project_list`, `/model_connect <id>`, `/model_disconnect <id>` (same active-account refusal as the CLI), `/task` (alias of `/packet`), `/account_list`, `/tenant_status`, `/hold on` (immediate) and `/hold off` (asks for YES in the next message first, any other message cancels it).
+- `/run --account <id> --task "<task>" [--model <id>] [--type <type>] [--title "<title>"] [--project <id>]`: one browser job through the shared queue on a connected account only. Every `run-browser` gate applies in the same order. The reply is the worker's own words, truncated to 4000 characters, and the result file is written to `browser-results/<tenant>/`. `/run_browser` stays refused and now names `/run`.
+- `/do <instruction>`: a small intent parser, no LLM call. Three patterns: `plan with chatgpt then audit with claude: <task>` (two-step pipeline, runs both steps on connected browser accounts when both exist, otherwise creates both packets), `project <id>: <task>` (project-scoped packet), `<task> with <model>` (model pick, only when the trailing word is a known subscription model). Anything else is a plain task. `/do` never deploys: with deploy, live, or publish words it reports the audit verdict from a text-marker check and says the deploy itself needs the user's approval in the Muse app.
+- Safety: one shared queue for the whole bot process, so one job at a time per account and pacing hold across `/run` and `/do`. Exactly one audit event per Telegram command; browser job lifecycle events are not written to the audit log from Telegram. No prompt text is ever put in an audit event.
+- New tests in `tests/run-telegram-tests.mjs`, 18 groups, temp dirs only, mock Telegram API only, never api.telegram.org, no real token. `npm test` now runs 137 groups.
+- Still not done: no dashboard token box yet, no live bot run yet (no real token exists), no deploy from Telegram, no webhook mode, no Phase 2 analytics service.
 
 ## What V1.9 adds: Telegram Bot Control
 

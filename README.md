@@ -1,6 +1,6 @@
 # TrustyMUSE Harness
 
-Version 1.9.0. A local harness that lets TrustyMUSE route work to chat AI
+Version 2.0.0. A local harness that lets TrustyMUSE route work to chat AI
 apps like ChatGPT, Claude, Gemini, Grok, DeepSeek, Perplexity, Meta AI,
 Copilot, and Mistral. TrustyMUSE is the controller. The chat AI apps are
 the workers.
@@ -55,11 +55,7 @@ node dist/index.js packet --model chatgpt --type seo --title "First task" --task
   writes.
 - **Audit log.** Every packet, check, block, and result is written to an
   append only audit log, per tenant.
-- **Telegram Bot control.** A Telegram Bot answers status, models,
-  projects, browser, analytics, and audit commands from your phone, and
-  creates draft packets only. Only allowlisted Telegram user ids get a
-  reply. The token comes only from `TELEGRAM_BOT_TOKEN`. Browser jobs
-  run from the CLI only. See `docs/V1-9-TELEGRAM-BOT.md`.
+- **Telegram full control.** A Telegram Bot runs everything the harness can do from your phone: projects, models, tasks, HOLD, one browser job at a time on a connected account with `/run`, and plain-language `/do` instructions into packets or a plan-then-audit pipeline. Only allowlisted Telegram user ids get a reply. The token comes from `TELEGRAM_BOT_TOKEN` first, then from the file token in `state/telegram.json`. Nothing here ever deploys. See `docs/V2-0-TELEGRAM-FULL-CONTROL.md`.
 
 ## Safety rules
 
@@ -103,7 +99,7 @@ fails. Developers start with
 [`docs/README.md`](docs/README.md).
 
 - [`INSTALL.md`](INSTALL.md): install, setup, tenants, migration.
-- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V1.9 do, and
+- [`docs/V1-NOTES.md`](docs/V1-NOTES.md): what V1 through V2.0 do, and
   what they do not do.
 - [`docs/V1-1-BROWSER-MODE.md`](docs/V1-1-BROWSER-MODE.md): browser
   session mode and the risk disclosure.
@@ -122,6 +118,9 @@ fails. Developers start with
   Analytics Phase 1, local collector with a dry-run preview only.
 - [`docs/V1-9-TELEGRAM-BOT.md`](docs/V1-9-TELEGRAM-BOT.md):
   Telegram Bot control, allowlist, commands, and safety rules.
+- [`docs/V2-0-TELEGRAM-FULL-CONTROL.md`](docs/V2-0-TELEGRAM-FULL-CONTROL.md):
+  Telegram full control, `/run`, `/do`, the deploy gate, and the token
+  fallback.
 
 ## Quick start
 
@@ -133,8 +132,8 @@ node dist/index.js setup --id jane-doe --name "Jane Doe"
 node dist/index.js status
 ```
 
-`npm test` runs 119 test groups: V1 7, browser 10, live driver 9,
-projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 17. Do not use the
+`npm test` runs 137 test groups: V1 7, browser 10, live driver 9,
+projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 35. Do not use the
 harness until the tests pass.
 
 First packet job. Connect ChatGPT first, because a fresh tenant starts

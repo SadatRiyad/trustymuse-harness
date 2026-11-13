@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Architecture
 
-Version 1.9.0. This document is for developers who want to understand how
+Version 2.0.0. This document is for developers who want to understand how
 the harness is built, or how to change it. It maps the design to the code,
 and it states the limits honestly.
 
@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs ten suites, 119 test groups in
+`npm test` builds the code, then runs ten suites, 137 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9, analytics 11, telegram 17. All suites use temp folders only, the mock driver, or
+15, connection 15, model-connect 9, analytics 11, telegram 35. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -386,13 +386,16 @@ every design choice.
   prints it and sends nothing, because there is no sending code and no
   central service yet. `analytics-enable` is refused until Phase 2.
   See `V1-8-ANALYTICS-PHASE-1.md`.
-- Telegram Bot control (V1.9) is a long-polling client in
+- Telegram full control (V2.0) is a long-polling client in
   `src/telegram/bot.ts`, using Node built-in fetch only. The token comes
-  only from `TELEGRAM_BOT_TOKEN`. Only allowlisted numeric user ids get
-  a reply. The bot answers read-only commands and creates draft packets
-  only; `/run_browser` is refused, browser jobs run from the CLI only.
-  HOLD blocks all Telegram writes. No live bot run has happened yet,
-  because no real token exists. See `V1-9-TELEGRAM-BOT.md`.
+  from `TELEGRAM_BOT_TOKEN` first, then from the file token in
+  `state/telegram.json`. Only allowlisted numeric user ids get a reply.
+  The bot runs the write commands the harness offers, runs one browser
+  job at a time on a connected account with `/run`, and parses
+  plain-language `/do` instructions into packets or a plan-then-audit
+  pipeline. It never deploys. HOLD blocks all Telegram writes. No live
+  bot run has happened yet, because no real token exists. See
+  `V2-0-TELEGRAM-FULL-CONTROL.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a
