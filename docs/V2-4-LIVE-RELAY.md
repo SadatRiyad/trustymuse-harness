@@ -21,9 +21,9 @@ A runtime hook, id `telegram-live-relay`, poll interval 10 seconds.
 
 The worker prompt is self-contained: it tells the worker to read the exact contract file `scripts/telegram-relay.md` and follow it exactly (harness root, tenant sadat-riyad, only allowlisted user 1891427699, at most 5 new messages oldest first, replies to the outbox, thread update, inbox lines done only after their reply is written, relay status file, lock removal, stay silent in chat for routine runs, report only when approval is needed in the Muse app or the relay itself fails, never deploy, push, merge, publish, log in, type a password, enter a one-time code, or solve a CAPTCHA, budget cap 0, no paid API call, no long dash characters). There is no second contract: the hook worker and the cron worker follow the same file.
 
-## The 1-minute cron stays
+## The 5-minute cron stays
 
-The hook makes replies faster; it does not replace the cron. The scheduled relay job every 1 minute stays as a safety net. It still picks up anything the hook misses, for example a message that arrived while a relay run was already working, or a line the worker failed to finish. Do not remove the cron.
+The hook makes replies faster; it does not replace the cron. The scheduled relay job every 5 minutes stays as a safety net. It still picks up anything the hook misses, for example a message that arrived while a relay run was already working, or a line the worker failed to finish. Do not remove the cron.
 
 ## What the latency is now
 

@@ -378,7 +378,7 @@ because the hook only removes the wait, it cannot make a model
 answer faster. It is also not true instant sync: a Muse agent run
 still has to start and think, and the machine must be running. If
 the machine is off, messages wait in the inbox until the next run.
-The 1-minute relay job stays as a safety net. See
+The 5-minute relay job stays as a safety net. See
 `V2-4-LIVE-RELAY.md`.
 
 ## 31. What happens when the Telegram bot crashes?

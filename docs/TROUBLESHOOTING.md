@@ -425,7 +425,7 @@ will reply here." at once, but no Muse reply arrives in Telegram.
 Cause: the acknowledgement only means the message reached the inbox.
 The Muse reply comes from the relay. Since V2.4 a live hook wakes
 the relay the moment a new message lands, and a scheduled relay job
-every 1 minute stays as a safety net. The relay writes the reply to
+every 5 minutes stays as a safety net. The relay writes the reply to
 the outbox for the bot to deliver. The relay cron job is created
 after the V2.2 build. Until then, chat messages queue and wait: that
 is expected, not a bug.

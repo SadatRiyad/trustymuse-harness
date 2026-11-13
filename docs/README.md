@@ -72,5 +72,5 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
   task, cloud jobs from Muse, and packet mode as the last resort.
 - [`V2-4-LIVE-RELAY.md`](V2-4-LIVE-RELAY.md):
   the live relay hook that wakes the relay the moment a Telegram
-  message lands, the 10-second poll, the watermark, and the 1-minute
+  message lands, the 10-second poll, the watermark, and the 5-minute
   cron as a safety net.

@@ -3,7 +3,7 @@
 The exact instruction text for the scheduled relay job that makes
 Telegram a Muse channel. The relay runs in the Muse runtime in two
 ways: a live hook wakes it the moment a new message lands (see the
-Live relay section below), and a scheduled job every 1 minute stays
+Live relay section below), and a scheduled job every 5 minutes stays
 as a safety net. It is Muse, in a scheduled job, with the same
 workspace, the same memory files, the same skills, and the same
 harness CLI as the Muse app chat. The bot process only collects
@@ -54,7 +54,7 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
   nothing: another relay run is already working. If it is older than
   10 minutes, the old run is dead: remove the lock and proceed.
 - Lock claim must be atomic, never check-then-create. Two runs can
-  start seconds apart (the 1-minute cron and a hook wake) and both
+  start seconds apart (the 5-minute cron and a hook wake) and both
   see no lock, then both answer the same message. That happened on
   2026-11-14: a cron run and a hook run both answered message
   897967623, and the user got two identical replies. Claim the lock
@@ -302,7 +302,7 @@ lands, instead of waiting for the next 1-minute run.
   clears wakes for it.
 - The worker the hook wakes follows this contract exactly, the same
   as the cron worker. There is no second contract.
-- The 1-minute cron stays as a safety net. It still picks up
+- The 5-minute cron stays as a safety net. It still picks up
   anything the hook misses, for example a message that arrived
   while a relay run was already working, or a line the worker
   failed to finish. The hook makes replies faster; it does not

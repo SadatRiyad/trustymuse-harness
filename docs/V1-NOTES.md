@@ -2,6 +2,10 @@
 
 Date: 2026-11-14. Status: V2.5.0 local only, multi-tenant, public repo. Version 2.5.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, and the owner is allowlisted.
 
+## What V2.5.1 changes: Relay Cron Relaxed to Every 5 Minutes
+
+The owner asked why Telegram replies were late. The cause was queueing: every relay run is a full agent run that takes minutes even with an empty inbox, and a 1-minute cron plus hook wakes kept queueing runs behind each other (one run in progress, one queued, hook logs full of "relay already running", one run started 4 minutes late). The auto-restart watchdog was not the cause: it only wakes an agent when the bot is dead. The fix: the relay cron moves from every 1 minute to every 5 minutes. The live hook stays the fast path, the cron stays as a safety net only. No behaviour change beyond the schedule.
+
 ## What V2.5.0 changes: Bot Auto-Restart (watchdog hook)
 
 On 2026-11-14 about 02:40 +06 the Telegram bot died on a poll failure
@@ -36,7 +40,7 @@ the race fix.
 
 ## What V2.4.0 changes: Live Relay Hook
 
-- A runtime hook, id `telegram-live-relay`, polls the Telegram inbox every 10 seconds and wakes the relay worker the moment a new message lands, because the owner asked whether the Telegram reply can be real-time with Muse. The 1-minute relay cron stays as a safety net.
+- A runtime hook, id `telegram-live-relay`, polls the Telegram inbox every 10 seconds and wakes the relay worker the moment a new message lands, because the owner asked whether the Telegram reply can be real-time with Muse. The 5-minute relay cron stays as a safety net.
 - The hook script is `~/hooks/scripts/telegram-inbox-watch.sh` (outside the repo, under the hooks dir). It reads only `state/telegram-inbox.jsonl` with `jq`, wakes only for a `messageId` with status `new` that it has not seen before, keeps a watermark of seen ids in the hook state dir, never reads message text, never touches a credential. A dry run never writes the watermark. If the relay lock is younger than 10 minutes it stays silent.
 - Reply latency is now stated as about 10 to 30 seconds for simple messages once the hook wakes the worker. A job with browser steps still takes as long as the models take to answer. Honest limit: this is near real-time, not instant, and not a webhook; a Muse agent run still has to start and think.
 - Changed files: `scripts/telegram-relay.md`, `docs/V2-4-LIVE-RELAY.md` (new), `docs/V2-2-TELEGRAM-MUSE-CHANNEL.md`, `docs/USER-GUIDE.md`, `INSTALL.md`, `docs/FAQ.md` (new question 30), `docs/TROUBLESHOOTING.md`, `docs/README.md`, `src/telegram/bot.ts`, `src/index.ts`, `package.json`, `config.example.yaml`, and this file. `npm test` now runs 183 groups.
