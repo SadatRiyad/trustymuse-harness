@@ -1,7 +1,7 @@
 # Telegram Relay Runner
 
 The exact instruction text for the scheduled relay job that makes
-Telegram a Muse channel. The relay runs every 2 minutes in the Muse
+Telegram a Muse channel. The relay runs every 1 minute in the Muse
 runtime. It is Muse, in a scheduled job, with the same workspace, the
 same memory files, the same skills, and the same harness CLI as the
 Muse app chat. The bot process only collects messages and delivers
@@ -236,8 +236,8 @@ plan in the tracker. Tell the user the paste is no longer needed.
 - At most 10 minutes per message step. Longer steps fail and the
   user is told.
 - At most 2 revisions in a multi-model fix loop.
-- Replies take about 2 to 4 minutes: up to 2 minutes waiting for the
-  next run, plus the time to answer. The first reply is the fixed
+- Replies take about 1 to 3 minutes for simple messages: up to 1 minute waiting for the
+  next run, plus the time to answer. A job with browser steps still takes as long as the models take to answer. The first reply is the fixed
   acknowledgement from the bot, sent at once. It is not a Muse reply.
 - Plain language. No long dash characters anywhere: use commas,
   periods, colons, or short hyphens only.

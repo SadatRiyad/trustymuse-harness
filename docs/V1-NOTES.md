@@ -1,6 +1,13 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-14. Status: V2.3 local only, multi-tenant, public repo. Version 2.3.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.2 code with the panel Start button, and the owner is allowlisted.
+Date: 2026-11-14. Status: V2.3.1 local only, multi-tenant, public repo. Version 2.3.1. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.2 code with the panel Start button, and the owner is allowlisted.
+
+## What V2.3.1 changes: Relay Every 1 Minute
+
+- The Telegram relay interval changes from every 2 minutes to every 1 minute, because the owner said the bot took too long to reply. The live relay schedule was changed by the parent first; this version makes the code, contract, and docs match that reality. No behaviour changes, only the interval numbers and the latency wording.
+- Reply latency is now stated as about 1 to 3 minutes for simple messages: up to 1 minute waiting for the next relay run, plus the time Muse needs to answer. A job with browser steps still takes as long as the models take to answer, and that honest note stays in the contract and the V2.2 doc.
+- Changed files: `scripts/telegram-relay.md`, `docs/V2-2-TELEGRAM-MUSE-CHANNEL.md`, `docs/USER-GUIDE.md`, `docs/TROUBLESHOOTING.md`, `INSTALL.md`, `package.json`, `config.example.yaml`, and this file. `npm test` still runs 182 groups.
+- Still not done: no push yet, the panel telegram_bot tab is being built separately by the panel builder.
 
 ## What V2.3 adds: Cloud Browser Mode
 

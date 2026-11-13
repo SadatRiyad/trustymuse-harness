@@ -121,7 +121,7 @@ add, remove, and pause projects, connect and disconnect models, turn HOLD on
 and off, run one browser job at a time on a connected account with `/run`,
 and give plain-language instructions with `/do`. You can also just talk:
 plain text that is not a command is queued for a scheduled relay job run
-by Muse, which answers it within about 2 to 4 minutes. The bot never
+by Muse, which answers it within about 1 to 3 minutes. The bot never
 deploys, publishes, merges, or sends anything. Stop it any time with
 `telegram-stop`. See `docs/V2-2-TELEGRAM-MUSE-CHANNEL.md` for chat mode,
 the inbox and outbox queues, and the relay contract,

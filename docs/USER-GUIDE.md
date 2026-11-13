@@ -726,7 +726,7 @@ the deploy gate.
 Plain text that is not a command is a chat message. Just talk: the bot
 queues the message in the inbox and replies at once with "Got it. Muse
 will reply here." A scheduled relay job run by Muse answers it within
-about 2 to 4 minutes, and the bot delivers the reply. Commands still
+about 1 to 3 minutes, and the bot delivers the reply. Commands still
 run at once, with no wait. Only allowlisted users can chat. The chat
 rate limit is 10 messages per user per 10 minutes, separate from the
 20-per-minute command limit. Check the relay with
