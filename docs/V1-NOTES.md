@@ -2,6 +2,20 @@
 
 Date: 2026-11-14. Status: V2.4.0 local only, multi-tenant, public repo. Version 2.4.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, restarted on V2.2 code with the panel Start button, and the owner is allowlisted.
 
+## What V2.4.1 changes: Atomic Relay Lock (duplicate-reply race fix)
+
+On 2026-11-14 a cron relay run and a hook relay run both answered
+Telegram message 897967623, 4 seconds apart, and the user got two
+identical replies. Root cause: the lock was check-then-create, so
+both runs saw no lock and both proceeded. The fix: the lock claim is
+now atomic with `mkdir state/telegram-relay.lock.d`, exactly one run
+wins, the loser exits at once; the run re-checks the lock after
+reading the inbox; lines already `processing` are skipped. The live
+relay hook script also treats the lock directory as running. Verified
+with a scratch simulation: two concurrent claims, one WON, one LOST
+with File exists, exactly one directory. No behaviour change beyond
+the race fix.
+
 ## What V2.4.0 changes: Live Relay Hook
 
 - A runtime hook, id `telegram-live-relay`, polls the Telegram inbox every 10 seconds and wakes the relay worker the moment a new message lands, because the owner asked whether the Telegram reply can be real-time with Muse. The 1-minute relay cron stays as a safety net.

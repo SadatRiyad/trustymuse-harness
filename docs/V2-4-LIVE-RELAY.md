@@ -32,6 +32,22 @@ The hook makes replies faster; it does not replace the cron. The scheduled relay
 - A job with browser steps: still as long as the models take to answer, minutes for ChatGPT and Gemini. The hook only removes the wait for the next run; it cannot make a model answer faster.
 - Honest limit: this is near real-time, not instant, and not a webhook. A Muse agent run still has to start and think, the bot still uses long polling, and the machine must be running. If the machine is off, messages wait in the inbox until the next run.
 
+## Duplicate-reply race, found live and fixed in 2.4.1
+
+On 2026-11-14 a cron relay run and a hook relay run both answered
+Telegram message 897967623, 4 seconds apart, and the user got two
+identical replies in Telegram. The duplicate cannot be unsent. Root
+cause: the lock was check-then-create, so both runs saw no lock and
+both proceeded. The fix, in the relay contract
+(`scripts/telegram-relay.md`): the lock claim is atomic with `mkdir
+state/telegram-relay.lock.d`, exactly one run wins and the loser
+exits at once; the winner writes `state/telegram-relay.lock` inside
+the directory; the run re-checks the lock after reading the inbox;
+lines already `processing` are skipped. The hook script also treats
+the lock directory as running. Verified with a scratch simulation:
+two concurrent claims, one WON, one LOST with File exists, exactly
+one directory.
+
 ## Known limits
 
 - A relay run that takes longer than 10 minutes makes its lock look dead to the next worker, the same as under the cron. The contract caps each step at 10 minutes, so a run should not normally pass that. This is a pre-existing contract rule, not a new risk from the hook.
@@ -50,8 +66,7 @@ New test group 66 in `tests/run-telegram-tests.mjs`, temp dirs only, no live net
 
 ## Still not done
 
-- No push yet. The commit is for the parent to make.
-- The real proof is the user's next Telegram message arriving faster. The hook has been verified silent on live polls and wake on a scratch inbox, but no live wake has happened yet, because no new Telegram message has arrived since the hook was enabled.
+- The real proof is the user's next Telegram message arriving once, not twice, after the atomic lock fix. The hook has woken live for message 897967622, and the race was proven live by the duplicate replies to message 897967623.
 - The panel does not show hook status yet.
 - No webhook mode. Long polling only.
 - No deploy from Telegram. The deploy gate decision (option A, B, or C, in writing) is still open.

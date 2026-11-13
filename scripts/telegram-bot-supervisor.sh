@@ -20,6 +20,15 @@
 # State files, all under the harness root:
 #   state/telegram-bot.pid        pid of the supervised bot
 #   state/telegram-heartbeat.json written by the bot on every poll
+#   state/telegram-bot.stopped    written by stop, removed by a successful
+#                                 start: it means the user stopped the bot
+#                                 on purpose, so the auto-restart watchdog
+#                                 must never start it again
+#   state/telegram-bot-watchdog-disabled
+#                                 written by the watchdog worker when it
+#                                 gives up after repeated failed restarts;
+#                                 removed by a successful start, so a manual
+#                                 start re-enables auto-restart
 #   logs/telegram-bot.log         bot stdout and stderr
 
 set -u
@@ -28,6 +37,8 @@ COMMAND="${1:-}"
 ROOT="${2:-$(cd "$(dirname "$0")/.." && pwd)}"
 TENANT="${3:-}"
 PID_FILE="$ROOT/state/telegram-bot.pid"
+STOPPED_FILE="$ROOT/state/telegram-bot.stopped"
+WATCHDOG_DISABLED_FILE="$ROOT/state/telegram-bot-watchdog-disabled"
 LOG_FILE="$ROOT/logs/telegram-bot.log"
 DIST_INDEX="$ROOT/dist/index.js"
 
@@ -149,10 +160,18 @@ check_token() {
   return 0
 }
 
+# Removes the intentional-stop and watchdog-disabled markers. Called
+# only on a successful start or adopt, never on a failed start, so a
+# start that fails keeps the stopped signal.
+clear_stop_markers() {
+  rm -f "$STOPPED_FILE" "$WATCHDOG_DISABLED_FILE"
+}
+
 cmd_start() {
   local recorded existing
   recorded=$(recorded_pid)
   if [ -n "$recorded" ] && pid_is_bot "$recorded" && pid_is_live "$recorded"; then
+    clear_stop_markers
     echo "Telegram bot is already running (pid $recorded). Adopted into state/telegram-bot.pid."
     return 0
   fi
@@ -160,6 +179,7 @@ cmd_start() {
   if [ -n "$existing" ]; then
     mkdir -p "$(dirname "$PID_FILE")"
     echo "$existing" > "$PID_FILE"
+    clear_stop_markers
     echo "Telegram bot is already running (pid $existing). Adopted into state/telegram-bot.pid."
     return 0
   fi

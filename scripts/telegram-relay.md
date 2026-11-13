@@ -52,9 +52,26 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
   start time of the running relay. Before doing any work, check it. If
   it exists and is younger than 10 minutes, exit at once and do
   nothing: another relay run is already working. If it is older than
-  10 minutes, the old run is dead: remove the lock and proceed. Create
-  the lock at the start of your run and remove it at the end, even
-  when the run fails.
+  10 minutes, the old run is dead: remove the lock and proceed.
+- Lock claim must be atomic, never check-then-create. Two runs can
+  start seconds apart (the 1-minute cron and a hook wake) and both
+  see no lock, then both answer the same message. That happened on
+  2026-11-14: a cron run and a hook run both answered message
+  897967623, and the user got two identical replies. Claim the lock
+  like this: run `mkdir state/telegram-relay.lock.d`. `mkdir` is
+  atomic, exactly one run wins. If `mkdir` fails because the
+  directory already exists, exit at once and do nothing. Only the
+  winner writes `state/telegram-relay.lock` (its pid and start time)
+  inside the directory. A stale claim (lock file older than 10
+  minutes) is removed by deleting the directory and the file, then
+  the run tries the `mkdir` claim once more; if it fails again, exit
+  at once. Remove the directory and the file at the end of the run,
+  even when the run fails.
+- After you claim the lock and read the inbox, re-check before you
+  touch any line: the lock directory must still exist and the lock
+  file inside it must still hold your own pid and start time. If it
+  does not, exit at once without writing anything. Another run owns
+  the work.
 - Audit log: the per-tenant audit log, the same one the Muse app
   writes. Log every action with an event name starting with
   `telegram_relay`, for example `telegram_relay_reply`,
@@ -64,13 +81,24 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
 
 ## How one run works
 
-1. Check the lock file. If another run is working, exit at once.
+1. Claim the lock with `mkdir state/telegram-relay.lock.d`. If the
+   `mkdir` fails, another run owns the work: exit at once. Only the
+   winner writes `state/telegram-relay.lock` (its pid and start time)
+   inside the directory. A lock file older than 10 minutes means the
+   old run is dead: delete the directory and the file, try the
+   `mkdir` claim once more, and exit at once if it fails again.
 2. Read the inbox. Take at most 5 lines with status `new`, oldest
-   first. The rest stay queued for the next run.
-3. For each line, mark it `processing` before you start work on it.
-   If the run crashes halfway, the line stays `processing`. A line
-   that stays `processing` for more than 10 minutes is treated as
-   crashed and picked up again, but only once, then marked `failed`.
+   first. The rest stay queued for the next run. Then re-check the
+   lock before you touch any line: the lock directory must still
+   exist and the lock file inside it must still hold your own pid
+   and start time. If it does not, exit at once without writing
+   anything.
+3. For each line, mark it `processing` before you start work on it,
+   right after the read, before any other work. Never process a line
+   that is already `processing`: another run owns it, skip it. If the
+   run crashes halfway, the line stays `processing`. A line that
+   stays `processing` for more than 10 minutes is treated as crashed
+   and picked up again, but only once, then marked `failed`.
 4. Load the thread file for that user, and the shared memory
    (`MEMORY.md` and `~/memory/`). Read the harness audit log for
    recent Telegram actions, so you know what the command bot did.
@@ -82,7 +110,9 @@ All paths are under the harness root, `~/workspace/trustymuse-harness/`.
    reply to the thread file as role `muse`. Mark the inbox line
    `done` only after the reply is written to the outbox. Never mark a
    line `done` before its reply exists.
-7. Write the relay status file. Remove the lock file.
+7. Write the relay status file. Remove the lock directory
+   `state/telegram-relay.lock.d` and the lock file
+   `state/telegram-relay.lock`.
 
 ## Per-message steps
 
