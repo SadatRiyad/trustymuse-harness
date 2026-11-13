@@ -1,6 +1,6 @@
 # TrustyMUSE Harness User Guide
 
-Version 1.8.0. This is the full command reference. Every command runs as
+Version 1.9.0. This is the full command reference. Every command runs as
 `node dist/index.js <command>`. Run `npm run build` or `npm test` first so
 `dist/` exists. Run `node dist/index.js help` at any time to see the same
 list in the terminal.
@@ -21,6 +21,7 @@ closed before any state is read or written.
 - [Projects](#projects)
 - [Audit and checks](#audit-and-checks)
 - [Analytics (Phase 1, preview only)](#analytics-phase-1-preview-only)
+- [Telegram Bot control](#telegram-bot-control)
 - [Packet mode vs browser mode](#packet-mode-vs-browser-mode)
 - [Budget](#budget)
 - [HOLD and policy](#hold-and-policy)
@@ -664,6 +665,93 @@ A no-op that confirms analytics is off and nothing is being sent. It
 changes nothing. The stored install id is kept, so Phase 2 can reuse
 it. The confirmation is audit logged.
 
+## Telegram Bot control
+
+Control the harness from Telegram with a bot you own. The bot uses long
+polling only, no webhook, no public server. See
+`V1-9-TELEGRAM-BOT.md` for the full guide.
+
+### telegram-start
+
+```bash
+export TELEGRAM_BOT_TOKEN=<token from @BotFather>
+node dist/index.js telegram-start [--tenant <id>]
+```
+
+Starts the bot loop for the resolved tenant. The token comes only from
+the `TELEGRAM_BOT_TOKEN` environment variable, never from a file.
+Starting without a token refuses with a message telling you to create a
+bot with @BotFather. Stop the bot with Ctrl+C. Only allowlisted Telegram
+user ids get a reply.
+
+### telegram-allow
+
+```bash
+node dist/index.js telegram-allow --user-id <id> --label "<Name>"
+```
+
+Adds a numeric Telegram user id to the allowlist in gitignored
+`state/telegram.json`. The label is a name you choose so the audit log
+is readable. The bot never reads a Telegram username. Send `/start` to
+the bot first, then read the user id from the terminal where the bot
+runs.
+
+### telegram-deny
+
+```bash
+node dist/index.js telegram-deny --user-id <id>
+```
+
+Removes a user id from the allowlist at once. That user gets no reply
+from the bot any more.
+
+### telegram-allowlist
+
+```bash
+node dist/index.js telegram-allowlist
+```
+
+Lists every allowlisted user id with its label and added time. Empty
+means no Telegram user gets a reply yet.
+
+### telegram-link
+
+```bash
+node dist/index.js telegram-link
+```
+
+Prints the exact steps to create the bot, set the token, start it, and
+allowlist yourself. No tenant is needed for this command.
+
+### Bot commands
+
+Once allowlisted, send these to the bot in Telegram. All are read-only
+except `/packet`, which creates a draft packet only.
+
+- `/start`, `/help`: greeting and the full command list.
+- `/status`: harness version, tenant, HOLD, budget cap and spend,
+  models connected, browser accounts.
+- `/models`: the 9 subscription models and their connected state, with
+  the connected-means-packet-only legend.
+- `/projects`: connected projects, kind, status, allowed task types.
+- `/browser_status`: browser accounts and their connected state.
+- `/analytics_status`: analytics off, install id, last preview, last
+  send never.
+- `/analytics_preview`: the exact counts-only payload, nothing sent.
+- `/audit`: the last 10 audit events, time, event, result. No detail
+  text, so no prompt content can leak.
+- `/packet --model <id> --type <type> --title "<title>" --task "<task>" [--project <id>]`: creates a draft packet, exactly like the CLI
+  packet command. Refused when HOLD is on, when the model is not
+  connected, or when the project scope is wrong.
+- `/run_browser`: refused, always. Browser jobs run from the CLI only.
+
+Safety: HOLD blocks all Telegram writes including packet creation.
+Budget cap 0 still blocks paid API calls. Each user may send at most 20
+commands per minute, then a polite slow-down reply. Every Telegram
+command writes exactly one audit event per tenant with the numeric
+Telegram user id only. A non-allowlisted user gets no reply at all, and
+the attempt is audit logged once per minute per user.
+
 ## Packet mode vs browser mode
 
 | | Packet mode | Browser mode |
@@ -711,7 +799,7 @@ HOLD is the kill switch. It lives in `config.yaml` as `policy.hold`. When
 HOLD is on, or when policy cannot be read, the harness fails closed and
 stops. HOLD blocks setup, tenant writes, tenant migration, model
 connects and disconnects, project writes, project-scoped jobs, browser
-connects, and browser jobs.
+connects, browser jobs, and packet creation from Telegram.
 
 Two things are never blocked by HOLD: `browser-disconnect`, because
 stopping use must never be blocked, and read-only commands such as

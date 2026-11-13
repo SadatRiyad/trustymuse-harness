@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Architecture
 
-Version 1.8.0. This document is for developers who want to understand how
+Version 1.9.0. This document is for developers who want to understand how
 the harness is built, or how to change it. It maps the design to the code,
 and it states the limits honestly.
 
@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs nine suites, 102 test groups in
+`npm test` builds the code, then runs ten suites, 119 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 15, model-connect 9, analytics 11. All suites use temp folders only, the mock driver, or
+15, connection 15, model-connect 9, analytics 11, telegram 17. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.
@@ -349,6 +349,17 @@ fake pages. No suite makes a live network call. The suites are:
   remote-call code in the analytics module, real CLI preview, status,
   enable refusal, and disable, tenant isolation, validator refuses an
   extra field and an over-size payload.
+- `tests/run-telegram-tests.mjs`: allowlist add, list, and remove, bad
+  ids and labels refused, unauthorized user gets no reply and is audit
+  logged, unauthorized repeat throttled, /start and /help through
+  pollOnce, /status contains version and HOLD, /models lists connected
+  state, /packet creates a packet file and exactly one audit event, HOLD
+  blocks /packet, token missing refuses start and the module holds no
+  hardcoded token, rate limit on the 21st command, one audit event per
+  command, /run_browser refused, analytics_preview prints the
+  counts-only payload with no secret text, /audit returns the last 10
+  events with no detail text, real CLI telegram-allow, telegram-allowlist,
+  telegram-link, and telegram-start refusal in a scratch copy.
 
 ## Honest limits
 
@@ -375,6 +386,13 @@ every design choice.
   prints it and sends nothing, because there is no sending code and no
   central service yet. `analytics-enable` is refused until Phase 2.
   See `V1-8-ANALYTICS-PHASE-1.md`.
+- Telegram Bot control (V1.9) is a long-polling client in
+  `src/telegram/bot.ts`, using Node built-in fetch only. The token comes
+  only from `TELEGRAM_BOT_TOKEN`. Only allowlisted numeric user ids get
+  a reply. The bot answers read-only commands and creates draft packets
+  only; `/run_browser` is refused, browser jobs run from the CLI only.
+  HOLD blocks all Telegram writes. No live bot run has happened yet,
+  because no real token exists. See `V1-9-TELEGRAM-BOT.md`.
 - The Send button after typing, the model picker menu contents, the
   response stop control label, and assistant message extraction are not
   verified live. The driver falls back to Enter and to waiting for a

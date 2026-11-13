@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Troubleshooting
 
-Version 1.8.0. Each entry has a symptom, a cause, and an exact fix. Read
+Version 1.9.0. Each entry has a symptom, a cause, and an exact fix. Read
 the symptom that matches what you see. Do not retry a failed step in a
 loop. Find the cause first.
 
@@ -334,3 +334,34 @@ Then open `https://github.com/SadatRiyad/trustymuse-harness` in a
 browser. If the page loads, the repo is public and the clone address is
 right. If the page also gives a 404, check the spelling of the owner and
 the repo name, and check your network.
+
+## 16. The Telegram bot does not start, or does not reply
+
+Symptom: `telegram-start` prints "Telegram bot was not started. No
+Telegram bot token found." Or the bot never replies in Telegram.
+
+Cause: the token is missing, or your Telegram user id is not
+allowlisted. The bot answers only allowlisted users, and a
+non-allowlisted user gets no reply at all, by design.
+
+Fix: create the bot with @BotFather, then set the token in the
+environment only, never in a file:
+
+```bash
+export TELEGRAM_BOT_TOKEN=<token from @BotFather>
+node dist/index.js telegram-start
+```
+
+Then send `/start` to the bot, read your numeric Telegram user id from
+the terminal where the bot runs, and allowlist yourself:
+
+```bash
+node dist/index.js telegram-allow --user-id <id> --label "Your Name"
+```
+
+Send `/start` again. If the bot still does not reply, check
+`telegram-allowlist` to confirm your id is listed, and check the audit
+log for a `telegram_unauthorized` event with your id. If
+`telegram-start` prints "Tenant check failed", run `setup` first: a
+fresh install has no tenant registry yet. See
+`V1-9-TELEGRAM-BOT.md`.

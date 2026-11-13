@@ -38,6 +38,7 @@ function ok(name) {
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NOW = new Date("2026-11-12T12:00:00Z");
+const repoVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf-8")).version;
 
 function writeJson(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -153,7 +154,7 @@ const payload = buildAnalyticsPayload(harnessRoot, NOW);
 // Test 1: the collector aggregates the right counts from the synthetic
 // audit log, counting only events inside the 24 hour window.
 assert.strictEqual(payload.payload_version, 1, "Payload version must be 1");
-assert.strictEqual(payload.harness_version, "1.8.0", "Harness version must come from package.json");
+assert.strictEqual(payload.harness_version, repoVersion, "Harness version must come from package.json");
 assert.strictEqual(payload.sent_at, "2026-11-12T12:00:00.000Z", "sent_at must be the given time");
 assert.strictEqual(payload.tenant_count, 2, "Tenant count must be 2");
 assert.deepStrictEqual(payload.connected_models, ["chatgpt", "claude", "gemini"], "Connected models must be the sorted union across tenants");

@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Documentation
 
-Version 1.8.0. Start here. Each document says who it is for in one line.
+Version 1.9.0. Start here. Each document says who it is for in one line.
 
 ## Start here
 
@@ -33,7 +33,7 @@ Version 1.8.0. Start here. Each document says who it is for in one line.
 
 ## Version notes, one per version
 
-- [`V1-NOTES.md`](V1-NOTES.md): what V1 through V1.8 do, what they do
+- [`V1-NOTES.md`](V1-NOTES.md): what V1 through V1.9 do, what they do
   not do, and how to run the first test.
 - [`V1-1-BROWSER-MODE.md`](V1-1-BROWSER-MODE.md): browser session mode,
   the risk disclosure, multi account rules, and how to enable it.
@@ -56,3 +56,5 @@ Version 1.8.0. Start here. Each document says who it is for in one line.
   means, the removed auto-seed, and what existing tenants keep.
 - [`V1-8-ANALYTICS-PHASE-1.md`](V1-8-ANALYTICS-PHASE-1.md): Analytics
   Phase 1, local collector with a dry-run preview only.
+- [`V1-9-TELEGRAM-BOT.md`](V1-9-TELEGRAM-BOT.md): Telegram Bot control,
+  allowlist, commands, and safety rules.

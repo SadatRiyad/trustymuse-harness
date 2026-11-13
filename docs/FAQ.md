@@ -1,6 +1,6 @@
 # TrustyMUSE Harness FAQ
 
-Version 1.8.0. Short answers, drawn only from what the harness does and
+Version 1.9.0. Short answers, drawn only from what the harness does and
 what has been verified. If an answer says something is not verified, that
 is the answer. Do not assume otherwise.
 
@@ -205,7 +205,7 @@ working folder. Never run a live browser job while the tests fail.
 ## 20. How do I update to a new version?
 
 Pull the latest code from the public repo, run `npm install`, then run
-`npm test`. All 102 test groups must pass before you use the new version.
+`npm test`. All 119 test groups must pass before you use the new version.
 Your state lives under `state/tenants/<your-id>/` and `profiles/`, and
 those folders are gitignored, so a pull does not touch them. Check the
 new version number in `package.json` and read the new `V1-*.md` notes
@@ -244,3 +244,30 @@ collector never reads an audit event's detail field. `analytics-enable`
 is refused until Phase 2 builds the central service, and
 `analytics-disable` is a no-op that confirms nothing is being sent.
 See `V1-8-ANALYTICS-PHASE-1.md`.
+
+## 23. How do I control the harness from Telegram?
+
+Create a bot with @BotFather in Telegram, copy the token it gives you,
+and set it in the environment only, never in a file:
+
+```bash
+export TELEGRAM_BOT_TOKEN=<token from @BotFather>
+node dist/index.js telegram-start
+```
+
+Send `/start` to the bot, read your numeric Telegram user id from the
+terminal where the bot runs, and allowlist yourself:
+
+```bash
+node dist/index.js telegram-allow --user-id <id> --label "Your Name"
+```
+
+Send `/start` again and the bot replies. From Telegram you can check
+`/status`, `/models`, `/projects`, `/browser_status`,
+`/analytics_status`, `/analytics_preview`, and `/audit`, and create a
+draft packet with `/packet`. Only allowlisted user ids get any reply.
+The bot never runs a browser job: `/run_browser` is refused, browser
+jobs run from the CLI only. HOLD blocks `/packet`. Stop the bot any time
+with Ctrl+C. No live bot run has happened yet, because no real token
+exists; the bot has only been run against a mock Telegram API in tests.
+See `V1-9-TELEGRAM-BOT.md`.

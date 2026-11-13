@@ -1,6 +1,7 @@
 node_modules/
 dist/
 state/
+state/telegram.json
 packets/
 config.yaml
 .env

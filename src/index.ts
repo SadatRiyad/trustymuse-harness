@@ -60,8 +60,21 @@ import {
   readAnalyticsState,
   recordPreview,
 } from "./analytics/collector";
+import {
+  allowTelegramUser,
+  createTelegramBot,
+  denyTelegramUser,
+  loadAllowlist,
+  requireTelegramToken,
+  TelegramHttpApi,
+} from "./telegram/bot";
 
-// TrustyMUSE Harness V1.8 CLI. Local only, multi-tenant.
+// TrustyMUSE Harness V1.9 CLI. Local only, multi-tenant.
+// V1.9 adds Telegram Bot control (see docs/V1-9-TELEGRAM-BOT.md). The bot
+// answers read-only commands for allowlisted users and creates draft
+// packets only. It never sends, publishes, merges, or deploys anything,
+// and it never runs a browser job. The token comes only from
+// TELEGRAM_BOT_TOKEN in the environment, never from a file.
 // V1.8 adds Analytics Phase 1: a local collector with a dry-run preview
 // only (see docs/V1-8-ANALYTICS-PHASE-1.md). analytics-preview prints the
 // exact payload that would be sent and sends nothing. There is no
@@ -109,6 +122,11 @@ import {
 //   node dist/index.js tenant-remove --id <id>
 //   node dist/index.js tenant-migrate
 //   node dist/index.js setup --id <id> --name "<Name>"
+//   node dist/index.js telegram-allow --user-id <id> --label "<Name>"
+//   node dist/index.js telegram-deny --user-id <id>
+//   node dist/index.js telegram-allowlist
+//   node dist/index.js telegram-link
+//   node dist/index.js telegram-start [--tenant <id>]
 // Browser mode is off by default. See docs/V1-1-BROWSER-MODE.md before you turn it on.
 // Projects are scopes only. Connecting a project never deploys or publishes it.
 
@@ -121,7 +139,7 @@ function getArg(args: string[], name: string, fallback: string): string {
 }
 
 function printHelp(): void {
-  console.log("TrustyMUSE Harness V1.8");
+  console.log("TrustyMUSE Harness V1.9");
   console.log("Usage:");
   console.log("  node dist/index.js status [--tenant <id>]");
   console.log("  node dist/index.js packet --model chatgpt --type seo --title \"Title\" --task \"Task text\" [--project my-project] [--tenant <id>]");
@@ -156,10 +174,16 @@ function printHelp(): void {
   console.log("  node dist/index.js analytics-status [--tenant <id>]");
   console.log("  node dist/index.js analytics-enable [--tenant <id>]");
   console.log("  node dist/index.js analytics-disable [--tenant <id>]");
+  console.log("  node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
+  console.log("  node dist/index.js telegram-deny --user-id <id>");
+  console.log("  node dist/index.js telegram-allowlist");
+  console.log("  node dist/index.js telegram-link");
+  console.log("  node dist/index.js telegram-start [--tenant <id>]");
   console.log("");
   console.log("Modes: subscription is on by default. API is off by default and blocked when budget cap is 0.");
   console.log("Models: 9 subscription models (chatgpt, claude, gemini, grok, deepseek, perplexity, meta-ai, copilot, mistral). Packet mode works for every connected one. Browser driver is wired only for chatgpt and claude; the rest are packet-only.");
   console.log("Analytics: Phase 1 is a dry-run preview only. analytics-preview prints the exact payload that would be sent and sends nothing. The central service is not built yet, so analytics-enable is refused until Phase 2.");
+  console.log("Telegram: control the harness from Telegram with telegram-start. The token comes only from TELEGRAM_BOT_TOKEN in the environment. Only allowlisted user ids get a reply. See docs/V1-9-TELEGRAM-BOT.md.");
   console.log("Browser mode is off by default. Read docs/V1-1-BROWSER-MODE.md before you turn it on.");
   console.log("Projects: connect any running or new project with project-add. Jobs scoped with --project are draft only.");
   console.log("Tenants: one tenant is one Muse account. Tenant is resolved from --tenant, then TRUSTYMUSE_TENANT, then tenants.default in config.yaml, then \"default\".");
@@ -381,6 +405,76 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Telegram allowlist commands. The allowlist is install-wide in
+  // gitignored state/telegram.json, not per tenant, so these commands do
+  // not resolve a tenant first. Only the numeric user id and an
+  // owner-given label are stored. No username, no token, no credential.
+  if (command === "telegram-allow") {
+    const userIdRaw = getArg(args, "--user-id", "");
+    const label = getArg(args, "--label", "");
+    if (!userIdRaw || !label) {
+      console.log("Usage: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
+      console.log("The user id is the numeric Telegram user id. Send /start to the bot first: the bot prints the id in the terminal where it runs when an unknown user tries it.");
+      return;
+    }
+    const userId = Number(userIdRaw);
+    try {
+      const entries = allowTelegramUser(rootDir, userId, label);
+      console.log(`Telegram user allowlisted: ${userId} (${label}). ${entries.length} user(s) on the allowlist.`);
+      console.log("That user can now send /start to the bot and get a reply. Anyone else gets no reply at all.");
+    } catch (error) {
+      console.log(`Telegram user was not allowlisted. ${String(error).replace(/^Error: /, "")}`);
+    }
+    return;
+  }
+
+  if (command === "telegram-deny") {
+    const userIdRaw = getArg(args, "--user-id", "");
+    if (!userIdRaw) {
+      console.log("Usage: node dist/index.js telegram-deny --user-id <id>");
+      return;
+    }
+    const userId = Number(userIdRaw);
+    try {
+      const removed = denyTelegramUser(rootDir, userId);
+      if (removed) {
+        console.log(`Telegram user removed from the allowlist: ${userId}. That user gets no reply from the bot any more.`);
+      } else {
+        console.log(`Telegram user ${userId} was not on the allowlist. Nothing changed.`);
+      }
+    } catch (error) {
+      console.log(`Telegram user was not removed. ${String(error).replace(/^Error: /, "")}`);
+    }
+    return;
+  }
+
+  if (command === "telegram-allowlist") {
+    const entries = loadAllowlist(rootDir);
+    if (entries.length === 0) {
+      console.log("Telegram allowlist is empty. No Telegram user gets a reply yet.");
+      console.log("Add one with: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
+      return;
+    }
+    console.log(`Telegram allowlist: ${entries.length} user(s). Only these ids get a reply from the bot.`);
+    for (const entry of entries) {
+      console.log(`  ${entry.id} (${entry.label}, added ${entry.addedAt})`);
+    }
+    return;
+  }
+
+  if (command === "telegram-link") {
+    console.log("Connect Telegram to the harness:");
+    console.log("  1. Open Telegram and talk to @BotFather. Send /newbot, give it a name and a username, and copy the token it gives you.");
+    console.log("  2. Set the token in the environment, never in a file: export TELEGRAM_BOT_TOKEN=<token from @BotFather>");
+    console.log("  3. Start the bot: node dist/index.js telegram-start [--tenant <id>]");
+    console.log("  4. Send /start to your bot in Telegram. The bot will not reply yet, because you are not allowlisted.");
+    console.log("  5. Read your numeric Telegram user id from the terminal where the bot runs. The bot prints it when an unknown user tries /start. It is also in the audit log as a telegram_unauthorized event.");
+    console.log("  6. Allowlist yourself: node dist/index.js telegram-allow --user-id <id> --label \"<Your name>\"");
+    console.log("  7. Send /start to the bot again. Now it replies. Send /help for the command list.");
+    console.log("The token is never stored by the harness. Stop the bot any time with Ctrl+C, and remove a user any time with telegram-deny.");
+    return;
+  }
+
   // Every remaining command is tenant-scoped. Resolve the tenant first;
   // an unknown, paused, or corrupt tenant stops the command here.
   const ctx = resolveContext(args, config, rootDir);
@@ -407,7 +501,7 @@ async function main(): Promise<void> {
 
   if (command === "status") {
     const status = budget.getStatus();
-    console.log("TrustyMUSE Harness V1.8 status");
+    console.log("TrustyMUSE Harness V1.9 status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${ctx.tenant.id}), ${tenantCount} tenant(s) on this install`);
     console.log(`Mode: ${config.subscriptionEnabled ? "subscription" : "none"}${config.apiEnabled ? " + api" : ""}${config.browser.enabled ? " + browser" : ""}`);
     console.log(`Browser: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}, headless ${config.browser.headless}, pacing ${config.browser.pacingMs} ms, daily limit ${config.browser.dailyLimitPerAccount} per account, max accounts ${config.browser.maxAccounts}`);
@@ -610,7 +704,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "session-status") {
-    console.log("TrustyMUSE Harness V1.8 browser session status");
+    console.log("TrustyMUSE Harness V1.9 browser session status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Browser mode: ${config.browser.enabled ? "ENABLED (opt in)" : "OFF by default"}`);
     console.log(`Headless: ${config.browser.headless}, profile root: ${ctx.profileRoot}`);
@@ -999,7 +1093,7 @@ async function main(): Promise<void> {
     for (const project of projects) {
       byStatus[project.status] += 1;
     }
-    console.log("TrustyMUSE Harness V1.8 project status");
+    console.log("TrustyMUSE Harness V1.9 project status");
     console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId})`);
     console.log(`Connected: ${projects.length} of max ${config.projects.maxProjects}. Active ${byStatus.active}, paused ${byStatus.paused}, archived ${byStatus.archived}.`);
     console.log(`Policy HOLD: ${config.hold ? "ON, project writes are blocked" : "OFF"}`);
@@ -1160,6 +1254,28 @@ async function main(): Promise<void> {
       rootDir,
       tenantId,
     );
+    return;
+  }
+
+  // Telegram bot, V1.9. Long polling only, no webhook. The token comes
+  // only from TELEGRAM_BOT_TOKEN in the environment. The bot serves this
+  // one tenant, resolved like any CLI command. Only allowlisted user ids
+  // get a reply. See docs/V1-9-TELEGRAM-BOT.md.
+  if (command === "telegram-start") {
+    let token: string;
+    try {
+      token = requireTelegramToken(process.env);
+    } catch (error) {
+      console.log(`Telegram bot was not started. ${String(error).replace(/^Error: /, "")}`);
+      return;
+    }
+    const api = new TelegramHttpApi(token);
+    const bot = createTelegramBot({ rootDir, ctx, config, api });
+    console.log("TrustyMUSE Harness V1.9 Telegram bot starting...");
+    console.log(`Tenant: ${ctx.tenant.displayName} (${tenantId}). Only allowlisted Telegram users get a reply.`);
+    console.log("Link a user first with: node dist/index.js telegram-allow --user-id <id> --label \"<Name>\"");
+    console.log("Stop the bot with Ctrl+C. HOLD blocks packet creation from Telegram. Browser jobs run from the CLI only.");
+    await bot.run();
     return;
   }
 

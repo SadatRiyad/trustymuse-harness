@@ -1,6 +1,17 @@
 # TrustyMUSE Harness V1 Notes
 
-Date: 2026-11-12. Status: V1.8 local only, multi-tenant, public repo. Version 1.8.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet.
+Date: 2026-11-14. Status: V1.9 local only, multi-tenant, public repo. Version 1.9.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet, no live Telegram bot run yet.
+
+## What V1.9 adds: Telegram Bot Control
+
+- New module `src/telegram/bot.ts`: a Telegram Bot API client using long polling (getUpdates with offset and timeout, sendMessage) over Node built-in fetch, no new dependency. The token comes only from the `TELEGRAM_BOT_TOKEN` environment variable, never from a config file, never logged, never printed. Starting without a token refuses with a message telling the user to create a bot with @BotFather. See `docs/V1-9-TELEGRAM-BOT.md`.
+- Authorization: an allowlist of numeric Telegram user ids in gitignored `state/telegram.json`, never in the repo. Only allowlisted ids get any reply. A non-allowlisted id gets no reply at all, and the attempt is audit logged once per minute per user.
+- CLI: `telegram-allow --user-id <id> --label "<Name>"`, `telegram-deny --user-id <id>`, `telegram-allowlist`, `telegram-link` (prints the exact linking steps), `telegram-start [--tenant <id>]` (runs the bot loop for one tenant, long polling only, stop with Ctrl+C).
+- Bot commands, all read-only except packet creation: `/start`, `/help`, `/status` (version, tenant, HOLD, budget cap and spend, models connected, browser accounts), `/models`, `/projects`, `/browser_status`, `/analytics_status`, `/analytics_preview` (counts-only payload), `/audit` (last 10 events, no detail text). `/packet --model <id> --type <type> --title "<title>" --task "<task>" [--project <id>]` creates a draft packet only, refused when HOLD is on. `/run_browser` is refused, browser jobs run from the CLI only.
+- Safety: HOLD blocks all Telegram writes including packet creation. Budget cap 0 still blocks paid API calls. Per-user rate limit 20 commands per minute, then a polite slow-down reply. Every Telegram command writes exactly one audit event per tenant with the numeric Telegram user id only, plus the owner-given label when one exists.
+- New tests in `tests/run-telegram-tests.mjs`, 17 groups, temp dirs only, mock Telegram API only, never api.telegram.org, no real token. `npm test` now runs 119 groups.
+- Bug found by the version bump and fixed: the analytics test hardcoded the harness version as "1.8.0" in `tests/run-analytics-tests.mjs`. It now reads the version from package.json, so future bumps do not break it.
+- Still not done: no live bot run yet (no real token exists), no webhook mode, no browser jobs from Telegram, no Phase 2 analytics service, no dashboard connection for the bot.
 
 ## What V1.8 adds: Analytics Phase 1, Local Collector, Dry-Run Preview Only
 

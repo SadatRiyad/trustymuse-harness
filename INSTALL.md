@@ -5,7 +5,7 @@ walkthrough, then `docs/USER-GUIDE.md` for every command,
 `docs/FAQ.md` for common questions, and `docs/TROUBLESHOOTING.md` when
 something fails. The full index is in `docs/README.md`.
 
-TrustyMUSE Harness V1.8. Local only, multi-tenant. One install serves
+TrustyMUSE Harness V1.9. Local only, multi-tenant. One install serves
 many Muse accounts, each tenant fully isolated. There is no central
 server and no public Muse account API in V1.4. Each Muse account runs
 its own copy of the harness in its own Muse workspace.
@@ -29,8 +29,8 @@ npm install
 npm test
 ```
 
-All test suites must pass before you use it. V1.8 runs 102 test groups:
-V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11.
+All test suites must pass before you use it. V1.9 runs 119 test groups:
+V1 7, browser 10, live driver 9, projects 12, tenants 14, models 15, connection 15, model-connect 9, analytics 11, telegram 17.
 
 If Chromium is missing for browser mode, install it with:
 
@@ -83,6 +83,31 @@ for a password or an API key. Then:
    `node dist/index.js packet --model chatgpt --type seo --title "First task" --task "Write a draft." --project my-project`
 5. Check the audit log:
    `node dist/index.js audit`
+
+## Telegram Bot control (V1.9)
+
+Control the harness from your phone with a Telegram Bot. Create the bot
+with @BotFather in Telegram, then set the token in the environment only,
+never in a file:
+
+```bash
+export TELEGRAM_BOT_TOKEN=<token from @BotFather>
+node dist/index.js telegram-start
+```
+
+Send `/start` to the bot, read your numeric Telegram user id from the
+terminal where the bot runs, and allowlist yourself:
+
+```bash
+node dist/index.js telegram-allow --user-id <id> --label "Your Name"
+```
+
+Send `/start` again and the bot replies. From Telegram you can check
+status, models, projects, browser, analytics, and audit, and create a
+draft packet with `/packet`. The bot never runs a browser job, and it
+never sends, publishes, merges, or deploys anything. Stop it any time
+with Ctrl+C. See `docs/V1-9-TELEGRAM-BOT.md` for the full command list
+and the safety rules.
 
 ## What is per tenant, and what is shared
 
@@ -165,5 +190,8 @@ instead.
   `docs/V1-6-BROWSER-CONNECT.md` and `docs/USER-GUIDE.md`.
 - No live prompt has been sent through the Playwright driver yet.
   The first live driver job is still untested.
+- No live Telegram bot run has happened yet. The bot has only been run
+  against a mock Telegram API in tests, because no real token exists.
+  See `docs/V1-9-TELEGRAM-BOT.md` for what is still not done.
 - See `docs/V1-4-MULTI-TENANT.md` for what a future hosted team
   server would need and why it is not in V1.4.

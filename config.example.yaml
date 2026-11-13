@@ -1,4 +1,4 @@
-# TrustyMUSE Harness V1.8 example config.
+# TrustyMUSE Harness V1.9 example config.
 # Copy this file to config.yaml to change settings.
 # Do not put any API key in this file. Keys only come from environment variables.
 # Monthly budget cap default is 0. With 0, every paid API call is blocked.
@@ -18,10 +18,14 @@
 # mistral. Packet mode works for every connected one. Browser driver is
 # wired only for chatgpt and claude; the rest are packet-only.
 # See docs/V1-5-MODELS.md.
+# Telegram (V1.9): control the harness from Telegram with telegram-start.
+# The bot token comes only from the TELEGRAM_BOT_TOKEN environment variable,
+# never from this file. Only allowlisted Telegram user ids get a reply.
+# See docs/V1-9-TELEGRAM-BOT.md.
 
 harness:
   name: trustymuse-harness
-  version: 1.8.0
+  version: 1.9.0
   mode: subscription
 
 budget:
