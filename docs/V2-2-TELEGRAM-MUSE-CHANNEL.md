@@ -11,12 +11,12 @@ Telegram stops being only a remote control with commands and becomes a second ch
 1. The user sends a plain message to the bot in Telegram.
 2. The bot checks the allowlist. A non-allowlisted user gets no reply at all, the same as for commands.
 3. The bot appends one line to `state/telegram-inbox.jsonl` and sends the fixed acknowledgement at once. The acknowledgement is a fixed string, not a Muse reply. It exists so the user is not left wondering whether the message arrived.
-4. A scheduled relay job runs every 1 minute. It reads the inbox, takes up to 5 lines with status `new`, oldest first, and marks each one `processing` before it starts work on it.
+4. A scheduled relay job runs every 1 minute, and since V2.4 a live hook (`telegram-live-relay`, poll every 10 seconds) wakes the relay the moment a new message lands, so simple replies no longer wait for the next scheduled run. The 1-minute job stays as a safety net. The relay reads the inbox, takes up to 5 lines with status `new`, oldest first, and marks each one `processing` before it starts work on it.
 5. The relay acts as Muse, with the same workspace, memory, skills, and harness CLI as the Muse app chat. It reads the thread file for that user, understands the message, does the work, and writes its reply.
 6. The relay appends the reply to `state/telegram-outbox.jsonl` with status `pending`, appends its reply to the thread file, and marks the inbox line `done` only after the reply is written.
 7. The bot, on its next poll cycle, reads the outbox, sends every `pending` line with `sendMessage`, and marks each one `sent` only after Telegram confirms the send.
 
-Replies take about 1 to 3 minutes for simple messages: up to 1 minute waiting for the next relay run, plus the time Muse needs to answer. A job with browser steps still takes as long as the models take to answer. A long job gets short progress messages while it works.
+Replies take about 10 to 30 seconds for simple messages once the hook wakes the worker, plus the time Muse needs to answer. A job with browser steps still takes as long as the models take to answer. A long job gets short progress messages while it works. See `V2-4-LIVE-RELAY.md` for the hook fast path.
 
 ## Queue file formats
 
@@ -83,7 +83,7 @@ A missing file means the relay has never run, never an error.
 - Every chat message writes exactly one audit event per tenant, `telegram_chat_queued`, with the numeric Telegram user id only, never the message text.
 - Chat messages do not count toward the command rate limit, and commands do not count toward the chat limit.
 - The inbox, outbox, thread files, relay status file, and lock file are all gitignored. A corrupt queue line is skipped, never fatal: one bad line must not stop the bot from polling or delivering the rest.
-- The relay job is created after this build. Until then, chat messages are queued and acknowledged, but no Muse reply arrives. Replies take about 1 to 3 minutes once the relay runs.
+- The relay job is created after this build. Until then, chat messages are queued and acknowledged, but no Muse reply arrives. Replies take about 10 to 30 seconds for simple messages once the relay runs (see `V2-4-LIVE-RELAY.md`).
 
 ## The two user examples
 
@@ -97,7 +97,7 @@ New tests in `tests/run-telegram-tests.mjs`, 15 groups, temp dirs only, mock Tel
 ## Still not done
 
 - No relay cron job yet. The relay contract is written in `scripts/telegram-relay.md`, but the scheduled job that runs it every 1 minute is created by the parent after verification. Until then, chat messages queue and wait.
-- No live chat reply yet. The bot acknowledges chat at once, but no Muse reply has been delivered through the outbox, because the relay has not run.
+- No live chat reply yet. The bot acknowledges chat at once, but no Muse reply has been delivered through the outbox, because the relay has not run. Since V2.4 a live hook wakes the relay the moment a message lands; replies take about 10 to 30 seconds for simple messages once the hook wakes the worker, not 1 to 3 minutes.
 - No panel change in this build. The panel does not show the inbox, the outbox, or the relay status yet.
 - No webhook mode. Long polling only.
 - No deploy from Telegram. The deploy gate decision (option A, B, or C, in writing) is still open.

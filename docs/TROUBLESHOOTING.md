@@ -423,16 +423,18 @@ Symptom: a plain message gets the fixed acknowledgement "Got it. Muse
 will reply here." at once, but no Muse reply arrives in Telegram.
 
 Cause: the acknowledgement only means the message reached the inbox.
-The Muse reply comes from the scheduled relay job, which runs every 1
-minute and writes the reply to the outbox for the bot to deliver. The
-relay cron job is created after the V2.2 build. Until then, chat
-messages queue and wait: that is expected, not a bug.
+The Muse reply comes from the relay. Since V2.4 a live hook wakes
+the relay the moment a new message lands, and a scheduled relay job
+every 1 minute stays as a safety net. The relay writes the reply to
+the outbox for the bot to deliver. The relay cron job is created
+after the V2.2 build. Until then, chat messages queue and wait: that
+is expected, not a bug.
 
 Fix: check the queue with `node dist/index.js telegram-relay-status`.
 If it says "Last relay run: never", the relay job does not exist yet.
 If the inbox pending count grows, the bot is queueing fine and the
-relay is what is missing. Once the relay runs, replies take about 2
-to 4 minutes. If the relay has run and the outbox pending count stays
+relay is what is missing. Once the relay runs, a simple reply takes
+about 10 to 30 seconds. If the relay has run and the outbox pending count stays
 above zero, the bot is not delivering: check `telegram-status` for
 RUNNING and the heartbeat last poll time. See
 `V2-2-TELEGRAM-MUSE-CHANNEL.md` and `scripts/telegram-relay.md`.

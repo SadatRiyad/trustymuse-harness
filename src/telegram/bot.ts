@@ -103,8 +103,8 @@ export const TELEGRAM_POLL_CONFLICT_BACKOFF_MS = 15000;
 
 // Chat mode, V2.2. Plain text is a chat message, not a command. The
 // bot queues it in the inbox and sends one fixed acknowledgement at
-// once. The relay answers later, so replies take about 1 to 3 minutes
-// for simple messages.
+// once. Since V2.4 a live hook wakes the relay the moment a message
+// lands, so simple replies take about 10 to 30 seconds.
 // The chat rate limit is separate from the command rate limit: at most
 // 10 chat messages per user per 10 minutes. The 11th gets one polite
 // slow-down reply, and further messages in the window are dropped

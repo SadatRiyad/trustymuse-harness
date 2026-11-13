@@ -70,3 +70,7 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
 - [`V2-3-CLOUD-BROWSER.md`](V2-3-CLOUD-BROWSER.md):
   cloud browser accounts, the two logins, verification by a browser
   task, cloud jobs from Muse, and packet mode as the last resort.
+- [`V2-4-LIVE-RELAY.md`](V2-4-LIVE-RELAY.md):
+  the live relay hook that wakes the relay the moment a Telegram
+  message lands, the 10-second poll, the watermark, and the 1-minute
+  cron as a safety net.

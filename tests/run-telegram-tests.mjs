@@ -1872,4 +1872,122 @@ function makeChatBot(root) {
   ok("outbox lines are delivered oldest first");
 }
 
+// 66. Live relay hook script: protocol lines, no token-like pattern,
+// and the watermark logic on a scratch inbox with a stub runtime.
+// Temp dirs only, never the real inbox, never api.telegram.org.
+{
+  const hookScript = path.join(os.homedir(), "hooks", "scripts", "telegram-inbox-watch.sh");
+  assert.ok(fs.existsSync(hookScript), "hook script exists");
+  fs.accessSync(hookScript, fs.constants.X_OK);
+  const scriptText = fs.readFileSync(hookScript, "utf-8");
+  for (const line of [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "HATCH_HOOK_RUNTIME",
+    "hook_state_get",
+    "hook_state_set",
+    "HATCH_HOOK_DRY_RUN",
+    "silent ",
+    "wake ",
+  ]) {
+    assert.ok(scriptText.includes(line), `hook script contains ${line}`);
+  }
+  assert.ok(!/[0-9]{8,10}:[A-Za-z0-9_-]{30,}/.test(scriptText), "hook script holds no token-like pattern");
+  assert.ok(!/sk-[A-Za-z0-9]{10,}/.test(scriptText), "hook script holds no api key pattern");
+  assert.ok(!scriptText.includes("api.telegram.org"), "hook script never calls the Telegram API");
+
+  const hookTmp = fs.mkdtempSync(path.join(os.tmpdir(), "trustymuse-harness-hook-test-"));
+  const hookStateDir = path.join(hookTmp, "state");
+  fs.mkdirSync(hookStateDir, { recursive: true });
+  const stubRuntime = path.join(hookTmp, "runtime.sh");
+  fs.writeFileSync(
+    stubRuntime,
+    [
+      "#!/usr/bin/env bash",
+      "HOOK_STATE_FILE=\"${HATCH_HOOK_STATE_DIR}/state.json\"",
+      "HOOK_DECISION_FILE=\"${HATCH_HOOK_STATE_DIR}/decision.log\"",
+      "hook_state_get() { cat \"$HOOK_STATE_FILE\" 2>/dev/null || echo '{}'; }",
+      "hook_state_set() { printf '%s' \"$1\" > \"$HOOK_STATE_FILE\"; }",
+      "silent() { printf '{\"decision\":\"silent\",\"reason\":\"%s\",\"payload\":%s}\\n' \"$1\" \"$2\" >> \"$HOOK_DECISION_FILE\"; }",
+      "wake() { printf '{\"decision\":\"wake\",\"reason\":\"%s\",\"payload\":%s}\\n' \"$1\" \"$2\" >> \"$HOOK_DECISION_FILE\"; }",
+      "log() { :; }",
+      "disable_after_run() { :; }",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  const inboxPath = path.join(hookTmp, "inbox.jsonl");
+  const writeInbox = (lines) => fs.writeFileSync(inboxPath, lines.join("\n") + "\n", "utf-8");
+  writeInbox([
+    JSON.stringify({ messageId: 101, telegramUserId: 1891427699, text: "hello one", receivedAt: "2026-11-14T00:00:00.000Z", status: "new", attempts: 0 }),
+    JSON.stringify({ messageId: 102, telegramUserId: 1891427699, text: "hello two", receivedAt: "2026-11-14T00:01:00.000Z", status: "new", attempts: 0 }),
+    JSON.stringify({ messageId: 100, telegramUserId: 1891427699, text: "old done", receivedAt: "2026-11-13T23:00:00.000Z", status: "done", attempts: 1 }),
+    "not json at all",
+  ]);
+  const decisionFile = path.join(hookStateDir, "decision.log");
+  const runHook = (dryRun, lockPath) => {
+    const env = {
+      ...process.env,
+      HATCH_HOOK_RUNTIME: stubRuntime,
+      HATCH_HOOK_ID: "telegram-live-relay",
+      HATCH_HOOK_STATE_DIR: hookStateDir,
+      HATCH_HOOK_DRY_RUN: dryRun ? "1" : "0",
+      TELEGRAM_INBOX_PATH: inboxPath,
+      TELEGRAM_RELAY_LOCK_PATH: lockPath,
+    };
+    execFileSync("bash", [hookScript], { env, encoding: "utf-8" });
+    const lines = fs.readFileSync(decisionFile, "utf-8").trim().split("\n").filter(Boolean);
+    return JSON.parse(lines[lines.length - 1]);
+  };
+  const readState = () => JSON.parse(fs.readFileSync(path.join(hookStateDir, "state.json"), "utf-8"));
+
+  // First run wakes for the two new ids and records them.
+  let decision = runHook(false, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "wake");
+  assert.deepEqual(decision.payload.newMessageIds, [101, 102]);
+  assert.equal(decision.payload.count, 2);
+  assert.deepEqual(readState().seen, [101, 102]);
+
+  // Second run stays silent: both ids are already seen.
+  decision = runHook(false, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "new messages already seen");
+
+  // A dry run wakes for a new id but does not write the watermark.
+  writeInbox([
+    JSON.stringify({ messageId: 101, telegramUserId: 1891427699, text: "hello one", receivedAt: "2026-11-14T00:00:00.000Z", status: "new", attempts: 0 }),
+    JSON.stringify({ messageId: 102, telegramUserId: 1891427699, text: "hello two", receivedAt: "2026-11-14T00:01:00.000Z", status: "new", attempts: 0 }),
+    JSON.stringify({ messageId: 103, telegramUserId: 1891427699, text: "hello three", receivedAt: "2026-11-14T00:02:00.000Z", status: "new", attempts: 0 }),
+  ]);
+  decision = runHook(true, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "wake");
+  assert.deepEqual(decision.payload.newMessageIds, [103]);
+  assert.deepEqual(readState().seen, [101, 102]);
+
+  // The real run then wakes for the same id and records it.
+  decision = runHook(false, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "wake");
+  assert.deepEqual(decision.payload.newMessageIds, [103]);
+  assert.deepEqual(readState().seen, [101, 102, 103]);
+
+  // A young lock stays silent and does not consume the detection.
+  const lockPath = path.join(hookTmp, "relay.lock");
+  fs.writeFileSync(lockPath, "12345 2026-11-14T00:00:00.000Z", "utf-8");
+  writeInbox([
+    JSON.stringify({ messageId: 104, telegramUserId: 1891427699, text: "hello four", receivedAt: "2026-11-14T00:03:00.000Z", status: "new", attempts: 0 }),
+  ]);
+  decision = runHook(false, lockPath);
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "relay already running");
+  assert.deepEqual(readState().seen, [101, 102, 103]);
+
+  // A missing inbox stays silent.
+  fs.rmSync(inboxPath);
+  decision = runHook(false, path.join(hookTmp, "no-lock"));
+  assert.equal(decision.decision, "silent");
+  assert.equal(decision.reason, "no inbox file");
+
+  ok("live relay hook script protocol, watermark, dry run, lock, and missing inbox");
+}
+
 console.log(`All ${passed} telegram test groups passed. Temp dir: ${tmp}`);

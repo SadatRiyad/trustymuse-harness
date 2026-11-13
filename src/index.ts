@@ -599,7 +599,7 @@ async function main(): Promise<void> {
     if (relay && relay.lastRunAt) {
       lines.push(`Last relay run: ${relay.lastRunAt} (processed ${relay.processed}, failed ${relay.failed})`);
     } else {
-      lines.push("Last relay run: never. The relay cron job is created after this build; replies take about 1 to 3 minutes once it runs.");
+      lines.push("Last relay run: never. The relay cron job is created after this build; a simple reply takes about 10 to 30 seconds once the live hook wakes the relay.");
     }
     if (relay && relay.lastError) {
       lines.push(`Last relay error: ${relay.lastError}`);

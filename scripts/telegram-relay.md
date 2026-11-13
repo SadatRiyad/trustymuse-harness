@@ -1,11 +1,13 @@
 # Telegram Relay Runner
 
 The exact instruction text for the scheduled relay job that makes
-Telegram a Muse channel. The relay runs every 1 minute in the Muse
-runtime. It is Muse, in a scheduled job, with the same workspace, the
-same memory files, the same skills, and the same harness CLI as the
-Muse app chat. The bot process only collects messages and delivers
-replies. The relay does the thinking.
+Telegram a Muse channel. The relay runs in the Muse runtime in two
+ways: a live hook wakes it the moment a new message lands (see the
+Live relay section below), and a scheduled job every 1 minute stays
+as a safety net. It is Muse, in a scheduled job, with the same
+workspace, the same memory files, the same skills, and the same
+harness CLI as the Muse app chat. The bot process only collects
+messages and delivers replies. The relay does the thinking.
 
 This file is the contract. The relay job follows it exactly. Nothing
 here is a suggestion.
@@ -236,14 +238,50 @@ plan in the tracker. Tell the user the paste is no longer needed.
 - At most 10 minutes per message step. Longer steps fail and the
   user is told.
 - At most 2 revisions in a multi-model fix loop.
-- Replies take about 1 to 3 minutes for simple messages: up to 1 minute waiting for the
-  next run, plus the time to answer. A job with browser steps still takes as long as the models take to answer. The first reply is the fixed
-  acknowledgement from the bot, sent at once. It is not a Muse reply.
+- Replies take about 10 to 30 seconds for simple messages once the
+  hook wakes the worker, plus the time Muse needs to answer. A job
+  with browser steps still takes as long as the models take to
+  answer. The first reply is the fixed acknowledgement from the bot,
+  sent at once. It is not a Muse reply.
 - Plain language. No long dash characters anywhere: use commas,
   periods, colons, or short hyphens only.
 - The relay runs only while the machine and the scheduler are
   running. If the machine is off, messages wait in the inbox until
   the next run.
+
+## Live relay (hook fast path)
+
+Since V2.4, a runtime hook wakes the relay the moment a new message
+lands, instead of waiting for the next 1-minute run.
+
+- Hook id `telegram-live-relay`, poll interval 10 seconds. Script:
+  `~/hooks/scripts/telegram-inbox-watch.sh` (the script lives
+  outside the repo, under the hooks dir, not in the harness).
+- The script reads only `state/telegram-inbox.jsonl` with `jq`,
+  looks for lines with status `new`, and wakes only when a
+  `messageId` appears that it has not seen before. It keeps a
+  watermark of seen message ids in the hook state dir, never in the
+  harness state. A dry run never writes the watermark, so it never
+  consumes a detection.
+- The wake payload holds only the new message ids and their count,
+  never message text, never a credential.
+- If the inbox file does not exist, the script stays silent. If the
+  relay lock file exists and is younger than 10 minutes, the script
+  stays silent, because another run is already working; the new
+  message stays unwatermarked, so the next poll after the lock
+  clears wakes for it.
+- The worker the hook wakes follows this contract exactly, the same
+  as the cron worker. There is no second contract.
+- The 1-minute cron stays as a safety net. It still picks up
+  anything the hook misses, for example a message that arrived
+  while a relay run was already working, or a line the worker
+  failed to finish. The hook makes replies faster; it does not
+  replace the cron.
+- Honest limit: the hook only removes the wait for the next run.
+  A Muse agent run still has to start and think, and a job with
+  browser steps still takes as long as the models take to answer.
+  This is near real-time, not instant, and it is not a webhook:
+  the bot still uses long polling, and the machine must be running.
 
 ## What the relay never builds
 

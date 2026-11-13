@@ -364,3 +364,19 @@ of asking you. `run-browser` still refuses a cloud account from the
 CLI: cloud jobs run from Muse, never from the CLI. Packet mode is now
 the last resort, for a model with no connected account anywhere. See
 `V2-3-CLOUD-BROWSER.md`.
+
+## 30. Is the Telegram reply real-time now?
+
+Almost, not instantly. The fixed acknowledgement ("Got it. Muse will
+reply here.") arrives in seconds, the same as before. Since V2.4 a
+live hook watches the inbox every 10 seconds and wakes the relay the
+moment a new message lands, so a simple reply usually arrives within
+about 10 to 30 seconds, instead of waiting up to 1 minute for the
+next scheduled relay run. A job with browser steps still takes as
+long as the models take to answer, minutes for ChatGPT and Gemini,
+because the hook only removes the wait, it cannot make a model
+answer faster. It is also not true instant sync: a Muse agent run
+still has to start and think, and the machine must be running. If
+the machine is off, messages wait in the inbox until the next run.
+The 1-minute relay job stays as a safety net. See
+`V2-4-LIVE-RELAY.md`.
