@@ -28,6 +28,10 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
   send a change, the code rules, and what a reviewer checks.
 - [`../INSTALL.md`](../INSTALL.md): for a new Muse account. Install,
   setup, tenants, switching tenants, migration, safety rules, and limits.
+- [`SETUP-ANOTHER-MUSE.md`](SETUP-ANOTHER-MUSE.md): the complete setup
+  prompt for a second Muse account, including the full TrustyHarness
+  panel spec and the update rule that keeps the panel in step with
+  every future pull.
 - [`../README.md`](../README.md): for everyone. The short intro,
   quickstart, feature list, safety rules, and links to all docs.
 
