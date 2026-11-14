@@ -2,6 +2,10 @@
 
 Date: 2026-11-14. Status: V2.5.0 local only, multi-tenant, public repo. Version 2.5.0. No central service, no data leaves the machine, no deploy, no live paid API, no credential stored, no live prompt sent yet. A live Telegram bot is running on the owner's install, and the owner is allowlisted.
 
+## What V2.5.4 changes: Relay Never Opens telegram.json
+
+The owner reported a safety breach: a relay worker opened `state/telegram.json` to check the allowlist, and the bot token appeared in the run's tool output. The token was not sent anywhere and was not written to any status or memory file (verified: zero token-shaped matches in the relay status file, the audit log, and the day's memory log), but the rule is that the token never appears in any log or output, and a run every 5 minutes would repeat it. The fix: the relay contract and the relay job body now both carry the explicit rule, never open `state/telegram.json` for any reason, and name the safe commands instead, `node dist/index.js telegram-allowlist` for the allowlist and `node dist/index.js telegram-status` for the token source and count, both of which never print the token value. The setup doc carries the same rule. No code change.
+
 ## What V2.5.3 changes: Setup Prompt for Another Muse Account
 
 The owner reported that on his other Muse, after pulling an update, the new features could not be used because the other install had no panel dashboard and no setup prompt for it. New doc `docs/SETUP-ANOTHER-MUSE.md`: a complete setup prompt for a second Muse account, covering the harness install, the tenant, the models, the browser accounts, the Telegram bot and relay, the hooks, the cron, and the full TrustyHarness panel spec (six tabs, every action with its exact behaviour, every state file, the styling rules), plus the update rule that keeps the panel in step with every future pull, and a verification checklist. The update rule is the fix: after every pull, read the top of V1-NOTES.md, build the new version's panel changes, add one import action, and confirm the panel version matches the repo version. No code change.

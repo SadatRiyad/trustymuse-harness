@@ -204,6 +204,12 @@ plan in the tracker. Tell the user the paste is no longer needed.
   non-allowlisted user gets no reply at all, and the bot already
   handles that before the inbox. Never answer a message from a user
   who is not on the allowlist.
+- Never open state/telegram.json, for any reason. That file holds the
+  bot token, and opening it puts the token in the tool output, which
+  breaks the rule below. To check the allowlist, run
+  `node dist/index.js telegram-allowlist`. To check the token source
+  and the allowlist count, run `node dist/index.js telegram-status`.
+  Both commands never print the token value.
 - HOLD blocks writes exactly as it blocks writes from commands. If
   HOLD is on and the user asks for a write, reply "HOLD is on. I
   cannot do that until HOLD is lifted." Read-only questions still

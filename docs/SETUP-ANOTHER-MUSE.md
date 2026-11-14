@@ -191,7 +191,9 @@ Register the hook `telegram-live-relay` with poll interval 10
 seconds, and the hook `telegram-bot-watchdog` with poll interval 30
 seconds. Both deliver to the chat where the harness lives. Test each
 with a dry run first, then enable it. The dry run must stay silent
-when there is nothing to do.
+when there is nothing to do. Do not skip the hook: without it, every
+Telegram reply waits up to 5 minutes for the next cron run, and the
+bot feels slow even though nothing is broken.
 
 The watchdog restarts the bot only when it crashed or went
 unresponsive. It never restarts a bot the user stopped on purpose:
@@ -482,7 +484,12 @@ an old version while the repo is new is an unfinished update.
   environment variables, or from the Secure Vault flow for website
   logins. Never print, log, or show a token, password, or key, not
   even in part, except the masked last-4 of the Telegram token in
-  the panel.
+  the panel. The relay worker must never open `state/telegram.json`,
+  for any reason: that file holds the bot token, and opening it puts
+  the token in the tool output. To check the allowlist, run
+  `node dist/index.js telegram-allowlist`. To check the token source
+  and the allowlist count, run `node dist/index.js telegram-status`.
+  Both commands never print the token value.
 - Monthly budget cap defaults to 0. With 0, every paid API call is
   blocked. The API adapters are stubs.
 - No auto publish, send, merge, or deploy. HOLD blocks all writes.
