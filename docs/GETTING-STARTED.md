@@ -1,6 +1,6 @@
 # Getting Started with TrustyMUSE Harness
 
-Version 2.0.0. This guide is for a complete beginner. It assumes you have
+Version 2.5.4. This guide is for a complete beginner. It assumes you have
 never used this harness before. It takes you from an empty folder to your
 first finished job.
 
@@ -67,9 +67,9 @@ things the harness needs.
 npm test
 ```
 
-Success looks like this: all 182 test groups pass. The groups are V1 7,
+Success looks like this: all 184 test groups pass. The groups are V1 7,
 browser 10, live driver 9, projects 12, tenants 14, models 15,
-connection 30, model-connect 9, analytics 11, and telegram 65. Do not use the harness until the tests pass. If a test
+connection 30, model-connect 9, analytics 11, and telegram 67. Do not use the harness until the tests pass. If a test
 fails, see `TROUBLESHOOTING.md`.
 
 The test command also builds the code first, so after `npm test` the
@@ -246,6 +246,25 @@ node dist/index.js packet --model chatgpt --type seo --title "Homepage draft" --
 ```
 
 Scoped jobs are draft only. They never publish, send, merge, or deploy.
+
+## Step 9. Telegram and the panel
+
+You can stop after Step 8. Packet mode already works. But to use the
+harness from your phone, set up Telegram next. Create a bot with
+@BotFather, save the token with `telegram-token-status` to check it,
+allowlist yourself with `telegram-allow`, and start the bot with
+`telegram-start`. Then set up the live relay hook and the watchdog
+hook, plus the scheduled relay job every 5 minutes as a safety net.
+The exact hook prompts and the exact relay job body are in
+`SETUP-ANOTHER-MUSE.md`, Part 3. Without the hook, every Telegram
+reply waits up to 5 minutes for the next cron run.
+
+Build the TrustyHarness panel too, using the full spec in
+`SETUP-ANOTHER-MUSE.md`, Part 4: six tabs (Console, Tasks, Workers,
+Analysis, Audit, Telegram Bot), every action with its exact
+behaviour, and every state file it reads. After every `git pull`,
+follow the update rule in Part 5, so the panel never lags the repo
+version.
 
 ## What to do next
 

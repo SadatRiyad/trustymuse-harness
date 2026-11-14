@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Architecture
 
-Version 2.0.0. This document is for developers who want to understand how
+Version 2.5.5. This document is for developers who want to understand how
 the harness is built, or how to change it. It maps the design to the code,
 and it states the limits honestly.
 
@@ -317,9 +317,9 @@ V1 uses Node with TypeScript for these reasons:
 
 ## Tests
 
-`npm test` builds the code, then runs ten suites, 182 test groups in
+`npm test` builds the code, then runs ten suites, 184 test groups in
 total: V1 7, browser 10, live driver 9, projects 12, tenants 14, models
-15, connection 30, model-connect 9, analytics 11, telegram 65. All suites use temp folders only, the mock driver, or
+15, connection 30, model-connect 9, analytics 11, telegram 67. All suites use temp folders only, the mock driver, or
 fake pages. No suite makes a live network call. The suites are:
 
 - `tests/run-tests.mjs`: budget block, packets, audit, policy, router.

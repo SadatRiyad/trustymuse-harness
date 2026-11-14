@@ -1,6 +1,6 @@
 # TrustyMUSE Harness
 
-Version 2.0.0. A local harness that lets TrustyMUSE route work to chat AI
+Version 2.5.5. A local harness that lets TrustyMUSE route work to chat AI
 apps like ChatGPT, Claude, Gemini, Grok, DeepSeek, Perplexity, Meta AI,
 Copilot, and Mistral. TrustyMUSE is the controller. The chat AI apps are
 the workers.
@@ -135,8 +135,8 @@ node dist/index.js setup --id jane-doe --name "Jane Doe"
 node dist/index.js status
 ```
 
-`npm test` runs 182 test groups: V1 7, browser 10, live driver 9,
-projects 12, tenants 14, models 15, connection 30, model-connect 9, analytics 11, telegram 65. Do not use the
+`npm test` runs 184 test groups: V1 7, browser 10, live driver 9,
+projects 12, tenants 14, models 15, connection 30, model-connect 9, analytics 11, telegram 67. Do not use the
 harness until the tests pass.
 
 First packet job. Connect ChatGPT first, because a fresh tenant starts

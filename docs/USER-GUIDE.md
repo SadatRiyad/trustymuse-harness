@@ -1,6 +1,6 @@
 # TrustyMUSE Harness User Guide
 
-Version 2.0.0. This is the full command reference. Every command runs as
+Version 2.5.5. This is the full command reference. Every command runs as
 `node dist/index.js <command>`. Run `npm run build` or `npm test` first so
 `dist/` exists. Run `node dist/index.js help` at any time to see the same
 list in the terminal.
@@ -732,8 +732,10 @@ run at once, with no wait. Only allowlisted users can chat. The chat
 rate limit is 10 messages per user per 10 minutes, separate from the
 20-per-minute command limit. Check the relay with
 `telegram-relay-status`, `telegram-inbox`, and `telegram-outbox`. The
-relay cron job is created after the V2.2 build; until then, chat
-messages queue and wait.
+relay cron runs every 5 minutes as a safety net, and the live hook
+wakes the relay the moment a message lands. See
+`SETUP-ANOTHER-MUSE.md`, Part 3, for the exact hook prompts and the
+exact relay job body.
 
 ### telegram-start
 

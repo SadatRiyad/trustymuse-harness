@@ -1,6 +1,6 @@
 # TrustyMUSE Harness FAQ
 
-Version 2.0.0. Short answers, drawn only from what the harness does and
+Version 2.5.5. Short answers, drawn only from what the harness does and
 what has been verified. If an answer says something is not verified, that
 is the answer. Do not assume otherwise.
 

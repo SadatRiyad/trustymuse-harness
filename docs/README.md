@@ -1,6 +1,6 @@
 # TrustyMUSE Harness Documentation
 
-Version 2.0.0. Start here. Each document says who it is for in one line.
+Version 2.5.5. Start here. Each document says who it is for in one line.
 
 ## Start here
 
@@ -78,3 +78,6 @@ Version 2.0.0. Start here. Each document says who it is for in one line.
   the live relay hook that wakes the relay the moment a Telegram
   message lands, the 10-second poll, the watermark, and the 5-minute
   cron as a safety net.
+- [`V2-5-BOT-AUTO-RESTART.md`](V2-5-BOT-AUTO-RESTART.md):
+  the bot watchdog hook that restarts a crashed or unresponsive bot,
+  the stopped marker, the give-up rule, and the live crash test.

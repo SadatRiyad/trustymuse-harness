@@ -187,13 +187,42 @@ cp hooks/telegram-bot-watchdog.sh ~/hooks/scripts/telegram-bot-watchdog.sh
 chmod +x ~/hooks/scripts/telegram-inbox-watch.sh ~/hooks/scripts/telegram-bot-watchdog.sh
 ```
 
-Register the hook `telegram-live-relay` with poll interval 10
-seconds, and the hook `telegram-bot-watchdog` with poll interval 30
-seconds. Both deliver to the chat where the harness lives. Test each
-with a dry run first, then enable it. The dry run must stay silent
-when there is nothing to do. Do not skip the hook: without it, every
-Telegram reply waits up to 5 minutes for the next cron run, and the
-bot feels slow even though nothing is broken.
+Register the hook `telegram-live-relay` with poll interval 10 seconds,
+script `~/hooks/scripts/telegram-inbox-watch.sh`, script timeout 600
+seconds, delivery to the chat where the harness lives, and this worker
+prompt, replacing the placeholders with your own values:
+
+```
+You are the Telegram relay for the TrustyMUSE harness, woken by the live inbox watcher because a new Telegram message just landed. Read the exact contract file first: ~/workspace/trustymuse-harness/scripts/telegram-relay.md, and follow it exactly. Harness root: ~/workspace/trustymuse-harness/. Tenant: <your-tenant-id>. The only allowlisted Telegram user is <your-telegram-user-id>.
+
+Your job this run: check the lock file, read new inbox lines in state/telegram-inbox.jsonl (at most 5, oldest first), do the work for each message with the same tools, memory, skills, and harness access Muse has in the app, write each reply to state/telegram-outbox.jsonl with status pending, update the thread file, mark inbox lines done only after their reply is written, write state/telegram-relay-status.json, and remove the lock file.
+
+Replies go to Telegram through the outbox. Do not send your replies as chat messages in this chat. Stay silent in this chat for routine runs. Report to this chat only when something needs the user's approval in the Muse app (deploy, GitHub push, merge, anything destructive), or when the relay itself fails and needs the user. Never deploy, push, merge, publish, or send anything on your own. Never log in, type a password, enter a one-time code, or solve a CAPTCHA. Never put a token, key, password, or secret into any message, file, packet, or audit event. Plain language, no long dash characters. Budget cap is 0, no paid API call. If the inbox is empty, write the relay status file and finish quietly.
+```
+
+Register the hook `telegram-bot-watchdog` with poll interval 30 seconds,
+script `~/hooks/scripts/telegram-bot-watchdog.sh`, script timeout 600
+seconds, delivery to the chat where the harness lives, and this worker
+prompt, replacing the placeholders with your own values:
+
+```
+You are the Telegram bot watchdog worker for the TrustyMUSE harness, woken because the bot looks dead or unresponsive. The wake payload names the reason (bot crashed, bot unresponsive, or unreadable pid file) and the last known pid. Harness root: <your-harness-root>. Tenant: <your-tenant-id>.
+
+Your job this run:
+1. Check first whether the bot is already back: run `node dist/index.js telegram-status` in the harness root and read state/telegram-heartbeat.json. If it says RUNNING with a heartbeat lastPollAt within the last 60 seconds and the pid file holds a live process, the bot is healthy: do nothing and finish silently.
+2. Restart the bot ONLY through the supervisor: `bash scripts/telegram-bot-supervisor.sh restart <your-harness-root> <your-tenant-id>`. Never launch node dist/index.js directly. The supervisor adopts a running bot instead of starting a duplicate.
+3. Verify it came back within 60 seconds: telegram-status says RUNNING, the heartbeat lastPollAt is fresh (within 60 seconds), the pid file holds a live process, and there is exactly one bot process. If it is back, finish silently.
+4. Track attempts in state/telegram-bot-watchdog.json (create it if missing): each entry holds at, reason, oldPid, newPid, and result. Prune entries older than 1 hour. Count failed restart attempts and crashes in the last 10 minutes.
+5. Give up when the bot does not come back after 2 restart attempts, or when it crashed 3 times within 10 minutes. On giving up, write the file state/telegram-bot-watchdog-disabled with the reason and time (plain text, never a token, key, password, or secret), leave the bot down, and report to this chat plainly that the bot is down, auto-restart has stopped, and the user should start it from the TrustyHarness panel or with node dist/index.js telegram-start.
+6. Stay silent in this chat for a routine successful restart. Report to this chat only when the bot does not come back and you gave up.
+
+Never log in, type a password, enter a one-time code, or solve a CAPTCHA. Never deploy, push, merge, or publish. Never put a token, key, password, or secret into any message, file, or audit event. Budget cap is 0, no paid API call. Plain language, no long dash characters. If the bot was stopped on purpose (state/telegram-bot.stopped exists), do not restart it and finish silently.
+```
+
+Test each hook with a dry run first, then enable it. The dry run must
+stay silent when there is nothing to do. Do not skip the hook: without
+it, every Telegram reply waits up to 5 minutes for the next cron run,
+and the bot feels slow even though nothing is broken.
 
 The watchdog restarts the bot only when it crashed or went
 unresponsive. It never restarts a bot the user stopped on purpose:
@@ -201,13 +230,25 @@ unresponsive. It never restarts a bot the user stopped on purpose:
 the bot, and the watchdog stays silent while that marker exists. A
 successful start clears the marker.
 
-Create the scheduled relay job with the body in
-`scripts/telegram-relay.md` as its instruction, every 5 minutes,
-owner the harness goal. It reads the contract file first on every
-run, takes at most 5 new inbox lines, writes replies to the outbox,
-updates the thread file, marks inbox lines done only after their
-reply is written, writes the relay status file, and removes the lock.
-It stays silent in chat for routine runs.
+Create the scheduled relay job with this exact body, replacing the
+placeholders with your own values. Schedule it every 5 minutes,
+timeout 1200 seconds, timezone your own, delivery to your own chat,
+owner the harness goal. Never copy the owner's chat id or tenant id
+into your job. It reads the contract file first on every run, takes
+at most 5 new inbox lines, writes replies to the outbox, updates the
+thread file, marks inbox lines done only after their reply is
+written, writes the relay status file, and removes the lock. It stays
+silent in chat for routine runs.
+
+```
+You are the Telegram relay for the TrustyMUSE harness. Read the exact contract file first: ~/workspace/trustymuse-harness/scripts/telegram-relay.md, and follow it exactly. Harness root: ~/workspace/trustymuse-harness/. Tenant: <your-tenant-id>. The only allowlisted Telegram user is <your-telegram-user-id>.
+
+Your job each run: check the lock file, read new inbox lines in state/telegram-inbox.jsonl (at most 5, oldest first), do the work for each message with the same tools, memory, skills, and harness access Muse has in the app, write each reply to state/telegram-outbox.jsonl with status pending, update the thread file, mark inbox lines done only after their reply is written, write state/telegram-relay-status.json, and remove the lock file.
+
+Never open state/telegram.json, for any reason. That file holds the bot token, and opening it puts the token in the tool output. To check the allowlist, run `node dist/index.js telegram-allowlist` from the harness root. To check the token source and the allowlist count, run `node dist/index.js telegram-status`. Both commands never print the token value.
+
+Replies go to Telegram through the outbox. Do not send your replies as chat messages in this chat. Stay silent in this chat for routine runs. Report to this chat only when something needs the user's approval in the Muse app (deploy, GitHub push, merge, anything destructive), or when the relay itself fails and needs the user. Never deploy, push, merge, publish, or send anything on your own. Never log in, type a password, enter a one-time code, or solve a CAPTCHA. Never put a token, key, password, or secret into any message, file, packet, or audit event. Plain language, no long dash characters. Budget cap is 0, no paid API call. If the inbox is empty, write the relay status file and finish quietly.
+```
 
 ## Part 4. Build the TrustyHarness panel
 
@@ -464,7 +505,17 @@ done:
    never touches HOLD, the budget cap, api_enabled, or
    browser_enabled, never connects an account, never stores a token.
    Run it and confirm the panel version now matches the repo
-   version in package.json.
+   version in package.json. When a version changes no panel section
+   and no panel action, the import action only bumps the version.
+   That was the case for every version from 2.3.1 through 2.5.4:
+   relay interval, live relay, the duplicate-reply race fix,
+   auto-restart, the cron change, hook scripts in the repo, the
+   setup prompt, and the telegram.json rule. None of them added a
+   panel section or action, so each one needed only a version bump.
+   Honest note: on the owner's own install the panel still shows
+   2.3.0, because those version-only imports were never added
+   there. Do not copy that lag. Add the version bump on every
+   update, even when nothing else in the panel changes.
 4. Verify with the panel actions: getSettings shows the new version,
    browserEnabled and apiEnabled match config.yaml, the cap matches,
    HOLD matches, and every new section shows live data, not a

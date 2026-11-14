@@ -5,7 +5,7 @@ walkthrough, then `docs/USER-GUIDE.md` for every command,
 `docs/FAQ.md` for common questions, and `docs/TROUBLESHOOTING.md` when
 something fails. The full index is in `docs/README.md`.
 
-TrustyMUSE Harness V1.9. Local only, multi-tenant. One install serves
+TrustyMUSE Harness V2.5.4. Local only, multi-tenant. One install serves
 many Muse accounts, each tenant fully isolated. There is no central
 server and no public Muse account API in V1.4. Each Muse account runs
 its own copy of the harness in its own Muse workspace.
@@ -130,8 +130,11 @@ the inbox and outbox queues, and the relay contract,
 `docs/V2-1-BOT-START-FROM-PANEL.md` for the supervisor contract, the
 heartbeat, and the poll loop fix, and
 `docs/V2-0-TELEGRAM-FULL-CONTROL.md` for the full command list, the `/do`
-patterns, and the deploy gate. The relay cron job is created after the
-V2.2 build; until then, chat messages queue and wait.
+patterns, and the deploy gate. Set up the live relay hook and the
+watchdog hook with the exact prompts in
+`docs/SETUP-ANOTHER-MUSE.md`, Part 3, and create the scheduled relay
+job every 5 minutes with the exact body there. Without the hook,
+every Telegram reply waits up to 5 minutes for the next cron run.
 
 ## What is per tenant, and what is shared
 
@@ -214,6 +217,11 @@ instead.
   `docs/V1-6-BROWSER-CONNECT.md` and `docs/USER-GUIDE.md`.
 - No live prompt has been sent through the Playwright driver yet.
   The first live driver job is still untested.
-- A live Telegram bot is running on the owner's install, started by hand before V2.1. It runs the V2.0 code until it is restarted with `telegram-stop` and `telegram-start`, so it has no heartbeat file and no poll fix yet. See `docs/V2-1-BOT-START-FROM-PANEL.md` for what is still not done.
+- The TrustyHarness panel is the dashboard for an install. Build it
+  from the full spec in `docs/SETUP-ANOTHER-MUSE.md`, Part 4, and
+  follow the update rule in Part 5 after every pull, so the panel
+  never lags the repo version. On the owner's own install the panel
+  still shows version 2.3.0, a known lag, because the version-only
+  imports for 2.3.1 through 2.5.4 were never added there.
 - See `docs/V1-4-MULTI-TENANT.md` for what a future hosted team
   server would need and why it is not in V1.4.
